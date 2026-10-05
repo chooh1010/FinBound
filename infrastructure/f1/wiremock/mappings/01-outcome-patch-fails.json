@@ -1,0 +1,10 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "PATCH",
+    "urlPathPattern": "/internal/v1/audits/[^/]+/outcome"
+  },
+  "response": {
+    "status": 503
+  }
+}

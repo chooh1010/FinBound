@@ -1,0 +1,10 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "ANY",
+    "urlPattern": ".*"
+  },
+  "response": {
+    "proxyBaseUrl": "http://core-api:8080"
+  }
+}

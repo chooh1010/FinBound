@@ -1,0 +1,30 @@
+# F1 real-failure variant, layered after docker-compose.f1-repro.yml.
+#
+# The gateway talks to core-api directly again (no injected 503). Instead a WireMock
+# proxy in front of mock-finance holds each downstream response for 2 s (1 s below the
+# downstream timeout), which leaves a window to `docker pause` core-api after the
+# request reached finance (the script polls this proxy's in-memory request count — not
+# verbose logging, which would write the internal credential header to logs) and before the
+# outcome is sent.
+#
+# pause, not stop: a graceful stop lets core-api finish in-flight work and hides the defect.
+services:
+  finance-proxy:
+    image: wiremock/wiremock:3.13.1
+    command: ["--port", "8080", "--disable-banner", "--max-request-journal-entries", "100"]
+    volumes:
+      - ./f1/wiremock-finance:/home/wiremock:ro
+    expose: ["8080"]
+    mem_limit: 256m
+    depends_on:
+      mock-finance:
+        condition: service_healthy
+    networks: [finance-zone]
+
+  gateway:
+    environment:
+      CORE_URL: http://core-api:8080
+      MOCK_FINANCE_URL: http://finance-proxy:8080
+    depends_on:
+      finance-proxy:
+        condition: service_started

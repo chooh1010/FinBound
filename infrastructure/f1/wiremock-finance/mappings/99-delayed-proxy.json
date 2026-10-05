@@ -1,0 +1,11 @@
+{
+  "priority": 10,
+  "request": {
+    "method": "ANY",
+    "urlPattern": ".*"
+  },
+  "response": {
+    "proxyBaseUrl": "http://mock-finance:8083",
+    "fixedDelayMilliseconds": 2000
+  }
+}
