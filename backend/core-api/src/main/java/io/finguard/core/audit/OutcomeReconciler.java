@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import io.finguard.core.domain.AuditEvent;
@@ -52,6 +53,8 @@ public class OutcomeReconciler {
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
         this.rowTransaction = new TransactionTemplate(transactionManager);
+        // 행마다 독립 커밋이어야 한다. 바깥 트랜잭션에 합류하면 행별 커밋·실패 격리가 깨진다.
+        this.rowTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.properties = properties;
         this.clock = clock;
         this.unknownCounter =

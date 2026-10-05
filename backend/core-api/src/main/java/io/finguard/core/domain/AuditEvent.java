@@ -1,9 +1,12 @@
 package io.finguard.core.domain;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.Set;
 
 import jakarta.persistence.CollectionTable;
@@ -183,6 +186,11 @@ public class AuditEvent {
     @Version
     @Column(name = "version", nullable = false)
     private long version;
+
+    /** behavior_risk numeric(5, 4). 비교할 때 저장소와 같은 자리에서 반올림한다. */
+    private static final int RISK_SCALE = 4;
+
+    private static final long HALF_MICRO_NANOS = 500;
 
     protected AuditEvent() {
         // JPA
@@ -421,6 +429,48 @@ public class AuditEvent {
         if (status != AuditStatus.PROCESSING) {
             throw new IllegalStateException("AuditEvent is already finalized");
         }
+        apply(completion);
+    }
+
+    /**
+     * OUTCOME_UNKNOWN이던 행에 늦게 도착한 실제 결과를 확정한다 — docs/06 §10.
+     *
+     * <p>조용히 덮어쓰지 않는다. 탐지 시각은 그대로 두고 해소 시각을 함께 남겨, "한동안 결과를
+     * 몰랐다"는 사실이 기록에서 사라지지 않게 한다.
+     */
+    public void resolveOutcome(AuditCompletion completion, Instant resolvedAt) {
+        if (status != AuditStatus.OUTCOME_UNKNOWN) {
+            throw new IllegalStateException("Only an outcome-unknown audit can be resolved");
+        }
+        apply(completion);
+        this.outcomeResolvedAt = resolvedAt;
+    }
+
+    /**
+     * 이미 확정된 결과와 같은 결과인가. 같으면 재전송이라 멱등 성공, 다르면 충돌이다.
+     *
+     * <p>결과 필드를 전부 비교한다. 일부만 보면 측정값이 다른 결과가 "같다"로 묻혀 조용히 사라진다.
+     * 저장소가 줄이는 정밀도(시각은 마이크로초, 위험 점수는 소수 넷째 자리)에 맞춰 비교한다 — 같은
+     * 값을 다시 보냈는데 저장 과정의 반올림 때문에 충돌로 보이면 안 된다.
+     */
+    public boolean hasSameOutcome(AuditCompletion completion) {
+        return completion.systemOutcome() == status
+                && completion.decision() == decision
+                && Set.copyOf(completion.reasonCodes()).equals(Set.copyOf(reasonCodes))
+                && Boolean.valueOf(completion.downstreamReached()).equals(downstreamReached)
+                && Boolean.valueOf(completion.responseReleased()).equals(responseReleased)
+                && Objects.equals(completion.success(), success)
+                && Objects.equals(completion.recordsRead(), recordsRead)
+                && Objects.equals(completion.latencyMs(), latencyMs)
+                && Objects.equals(completion.errorLocation(), errorLocation)
+                && sameRisk(completion.behaviorRisk(), behaviorRisk)
+                && completion.severity() == severity
+                && Objects.equals(completion.riskFlagged(), riskFlagged)
+                && Objects.equals(completion.policyVersion(), policyVersion)
+                && Objects.equals(storedPrecision(completion.completedAt()), storedPrecision(completedAt));
+    }
+
+    private void apply(AuditCompletion completion) {
         if (completion.completedAt().isBefore(requestedAt)) {
             throw new IllegalArgumentException("completedAt must not precede requestedAt");
         }
@@ -439,5 +489,22 @@ public class AuditEvent {
         this.policyVersion = completion.policyVersion();
         this.status = completion.systemOutcome();
         this.completedAt = completion.completedAt();
+    }
+
+    private static boolean sameRisk(BigDecimal incoming, BigDecimal stored) {
+        if (incoming == null || stored == null) {
+            return incoming == stored;
+        }
+        return incoming.setScale(RISK_SCALE, RoundingMode.HALF_UP)
+                .compareTo(stored.setScale(RISK_SCALE, RoundingMode.HALF_UP)) == 0;
+    }
+
+    /**
+     * PostgreSQL JDBC는 나노초를 마이크로초로 버리지 않고 반올림해 저장한다. 같은 방식으로 맞춰야
+     * 같은 값을 다시 보냈을 때 같다고 판단한다(버림으로 비교하면 500ns 이상 자리에서 충돌로 오판).
+     */
+    private static Instant storedPrecision(Instant instant) {
+        // null은 null로 둔다. 다른 값으로 바꾸면 "완료 시각 없음"이 우연히 같은 값과 같다고 판정될 수 있다.
+        return instant == null ? null : instant.plusNanos(HALF_MICRO_NANOS).truncatedTo(ChronoUnit.MICROS);
     }
 }

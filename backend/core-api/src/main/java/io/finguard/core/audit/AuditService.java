@@ -1,18 +1,16 @@
 package io.finguard.core.audit;
 
-import java.util.LinkedHashSet;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import io.finguard.core.domain.AuditCompletion;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.identifier.RecordIdentifiers;
 import io.finguard.core.repository.AuditEventRepository;
 
-/** Business Audit 선저장과 최종 Outcome 갱신. */
+/** Business Audit 선저장. 최종 Outcome 반영은 {@link AuditOutcomeService}가 맡는다. */
 @Service
 public class AuditService {
 
@@ -48,49 +46,6 @@ public class AuditService {
                 throw AuditOperationException.duplicate();
             }
             throw AuditOperationException.writeFailed(exception);
-        } catch (DataAccessException exception) {
-            throw AuditOperationException.writeFailed(exception);
-        }
-    }
-
-    @Transactional
-    public AuditResponse updateOutcome(
-            String requestId,
-            AuditOutcomeRequest request,
-            String trustedVerifiedAgentId) {
-        AuditEvent event =
-                auditEvents
-                        .findByRequestId(requestId)
-                        .orElseThrow(AuditOperationException::notFound);
-        if (!event.getAgentId().equals(trustedVerifiedAgentId)) {
-            throw AuditOperationException.notFound();
-        }
-        if (event.getStatus() != io.finguard.core.domain.AuditStatus.PROCESSING) {
-            throw AuditOperationException.duplicate();
-        }
-
-        LinkedHashSet<String> reasonCodes = new LinkedHashSet<>();
-        request.reasonCodes().stream().map(Enum::name).sorted().forEach(reasonCodes::add);
-        try {
-            event.complete(
-                    new AuditCompletion(
-                            request.decision(),
-                            request.systemOutcome(),
-                            reasonCodes,
-                            request.downstreamReached(),
-                            request.responseReleased(),
-                            request.success(),
-                            request.recordsRead(),
-                            request.latencyMs(),
-                            request.errorLocation(),
-                            request.behaviorRisk(),
-                            request.severity(),
-                            request.riskFlagged(),
-                            request.policyVersion(),
-                            request.completedAt()));
-            return AuditResponse.from(auditEvents.saveAndFlush(event));
-        } catch (IllegalArgumentException exception) {
-            throw AuditOperationException.invalidOutcome();
         } catch (DataAccessException exception) {
             throw AuditOperationException.writeFailed(exception);
         }
