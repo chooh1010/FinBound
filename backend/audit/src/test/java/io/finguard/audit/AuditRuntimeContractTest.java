@@ -93,6 +93,16 @@ class AuditRuntimeContractTest {
                 "audit-event.error.valid.json"
             ),
             Arguments.of(
+                "결과 미도착은 Core가 결과 필드 없이 OUTCOME_UNKNOWN으로 기록",
+                "audit-event.schema.json",
+                "audit-event.outcome-unknown.valid.json"
+            ),
+            Arguments.of(
+                "늦게 도착한 결과로 확정해도 탐지 시각을 보존",
+                "audit-event.schema.json",
+                "audit-event.outcome-resolved.valid.json"
+            ),
+            Arguments.of(
                 "인증 실패는 최소 SecurityAuthEvent로 분리",
                 "security-auth-event.schema.json",
                 "security-auth-event.valid.json"
@@ -151,6 +161,36 @@ class AuditRuntimeContractTest {
                 "BLOCK Business Audit의 실행 측정값 차단",
                 "audit-event.schema.json",
                 "audit-event.block-execution-values.invalid.json"
+            ),
+            Arguments.of(
+                "OUTCOME_UNKNOWN에 지어낸 판정·도달 여부 차단",
+                "audit-event.schema.json",
+                "audit-event.outcome-unknown-invented-decision.invalid.json"
+            ),
+            Arguments.of(
+                "OUTCOME_UNKNOWN의 탐지 시각 누락 차단",
+                "audit-event.schema.json",
+                "audit-event.outcome-unknown-without-detection.invalid.json"
+            ),
+            Arguments.of(
+                "탐지 없이 해소 시각만 있는 기록 차단",
+                "audit-event.schema.json",
+                "audit-event.outcome-resolved-without-detection.invalid.json"
+            ),
+            Arguments.of(
+                "탐지된 적 있는 확정 기록의 해소 시각 누락 차단",
+                "audit-event.schema.json",
+                "audit-event.detected-final-without-resolution.invalid.json"
+            ),
+            Arguments.of(
+                "PROCESSING의 탐지 시각 차단",
+                "audit-event.schema.json",
+                "audit-event.processing-with-detection.invalid.json"
+            ),
+            Arguments.of(
+                "Gateway 결과 입력의 OUTCOME_UNKNOWN 차단",
+                "execution-outcome.schema.json",
+                "execution-outcome.outcome-unknown.invalid.json"
             ),
             Arguments.of(
                 "인증 실패 Event의 Business Audit 필드 차단",

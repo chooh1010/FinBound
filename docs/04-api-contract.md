@@ -203,6 +203,9 @@ Viewer는 Dashboard와 같은 읽기 전용 범위에서 전체 실행을 조회
 - `FAILED`는 AuditEvent가 없어도 반환한다. Core가 Agent를 호출하지 못한 실패를 화면에서
   영구 `RUNNING`으로 오인하지 않기 위해서다.
 - `RUNNING`에서는 완료되지 않은 PROCESSING AuditEvent를 `attempts`에 싣지 않는다.
+- `OUTCOME_UNKNOWN` AuditEvent도 결과가 없으므로 `attempts`에 싣지 않는다. 대신 실행의
+  `reasonCodes`에 `AUDIT_OUTCOME_UNKNOWN`을 넣어, 시도가 0건인 "완료"로 보이지 않게 한다.
+  결과가 늦게 도착해 확정되면 그 시도는 `attempts`에 나타나고 이 코드는 빠진다.
 - 정책 판정 전 시스템 오류는 `systemOutcome=ERROR`이고 `decision`을 생략할 수 있다.
 - Downstream 오류는 `decision=ALLOW`, `systemOutcome=ERROR`가 될 수 있다.
 - 응답은 식별자·권한 증거·판정·시각만 포함한다. 원본 Prompt, 금융 문서, 금융 응답,
@@ -850,6 +853,9 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 
 `errorLocation`은 `^[A-Z][A-Z0-9_]*$` 형식이다.
 
+`systemOutcome`은 `COMPLETED | ERROR`만 받는다. `PROCESSING`과 `OUTCOME_UNKNOWN`은 `400`으로
+거부한다 — `OUTCOME_UNKNOWN`은 Core만 기록하는 상태다(docs/06 §10).
+
 ```json
 {
   "decision": "ALLOW",
@@ -1071,6 +1077,27 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 }
 ```
 
+결과 기록이 도착하지 않은 행은 Core가 `OUTCOME_UNKNOWN`으로 바꾼다. 결과 필드는 비어 있고
+탐지 시각만 있다(`contracts/audit/audit-event.schema.json`, docs/06 §10).
+
+```json
+{
+  "auditEventId": "AUD-002",
+  "requestId": "REQ-002",
+  "traceId": "4bf92f0000000002",
+  "agentId": "LOAN-AGENT-01",
+  "agentRunId": "RUN-002",
+  "requestedTool": "CREDIT_SCORE_READ",
+  "reasonCodes": [],
+  "status": "OUTCOME_UNKNOWN",
+  "requestedAt": "2026-08-17T21:32:10+09:00",
+  "outcomeUnknownDetectedAt": "2026-08-17T21:33:15+09:00"
+}
+```
+
+늦게 도착한 결과로 확정된 행은 `status`가 `COMPLETED | ERROR`이고 `outcomeUnknownDetectedAt`과
+`outcomeResolvedAt`을 함께 가진다.
+
 ### SecurityAuthEvent
 
 ```json
@@ -1099,6 +1126,10 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 | `GET /api/v1/agent-runs/{agentRunId}/permission-comparison` | Viewer 또는 Operator |
 
 Vue는 PostgreSQL을 직접 조회하지 않는다.
+
+`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `error`, `outcomeUnknown`을 반환한다.
+`total`은 나머지의 합과 같지 않을 수 있다 — 진행 중인 `PROCESSING`은 `total`에만 들어간다.
+`outcomeUnknown`은 판정이 없으므로 `allow`·`block`에 넣지 않는다.
 
 `GET /api/v1/audit-events`는 기본 필터와 함께 `severity=LOW|MEDIUM|HIGH|CRITICAL`,
 `riskOnly=true`를 지원한다. 두 값은 Prompt/Behavior 점수에서 Dashboard가 다시 계산하지 않고,

@@ -1,0 +1,10 @@
+{
+  "auditEventId": "AUD-001",
+  "requestId": "REQ-001",
+  "traceId": "4bf92f0000000001",
+  "agentId": "LOAN-AGENT-01",
+  "agentRunId": "RUN-001",
+  "status": "PROCESSING",
+  "requestedAt": "2026-08-17T21:32:10+09:00",
+  "outcomeUnknownDetectedAt": "2026-08-17T21:33:15+09:00"
+}

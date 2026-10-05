@@ -124,9 +124,26 @@ FAILED
 PROCESSING
 COMPLETED
 ERROR
+OUTCOME_UNKNOWN
 ```
 
 `PolicyDecision=BLOCK`이 정상적으로 집행되면 `AuditStatus=COMPLETED`다.
+
+`OUTCOME_UNKNOWN`은 시작 기록 이후 결과 기록이 도착하지 않은 채 **60초**가 지났다는 뜻이다.
+60초는 Core가 시작 기록을 받은 시각(Core의 시계)부터 잰다. 잠정값이며 성공 경로 지연을 측정해
+근거를 남기고 조정한다.
+Gateway가 보내는 값이 아니라 **Core만 기록하는 상태**다 — Gateway의 결과 입력은
+`COMPLETED | ERROR`뿐이다. 결과를 알 수 없으므로 판정·Downstream 도달·응답 제공·성공 여부·
+완료 시각 같은 결과 필드를 채우지 않는다(추측해 채우면 거짓 증거가 된다). 시작 기록 때 남은
+근거(ScopeStatus, Prompt Risk 등)는 그대로 둔다.
+
+| 시각 필드 | 의미 |
+|---|---|
+| `outcomeUnknownDetectedAt` | Core가 결과 미도착을 처음 기록한 시각. 이후 바뀌지 않는다 |
+| `outcomeResolvedAt` | `OUTCOME_UNKNOWN`이던 행에 실제 결과가 늦게 도착해 확정된 시각. 이때 상태는 `COMPLETED` 또는 `ERROR`이고 `outcomeUnknownDetectedAt`은 남는다 |
+
+두 시각은 Core가 기록하는 시각이다. Gateway가 보낸 `completedAt`과 다른 시계를 쓰므로 서로 빼서
+지연을 계산하지 않는다.
 
 ### SecurityAuthEvent
 
@@ -362,6 +379,7 @@ UNKNOWN_PROMPT_ATTACK
 | `POLICY_ENGINE_UNAVAILABLE` | OPA Timeout/오류 |
 | `POLICY_DECISION_INVALID` | OPA 응답 형식 오류 |
 | `AUDIT_WRITE_FAILED` | Business Audit 저장 실패 |
+| `AUDIT_OUTCOME_UNKNOWN` | 결과 기록이 도착하지 않아 실행 결과를 확인할 수 없음 (AgentRun 실행 조회에 표시) |
 | `SECURITY_EVENT_WRITE_FAILED` | SecurityAuthEvent 저장 실패 |
 | `DOWNSTREAM_ERROR` | Mock Financial API 처리 오류 |
 | `DOWNSTREAM_TIMEOUT` | Mock Financial API Timeout |
@@ -499,6 +517,8 @@ Prompt Risk는 Runtime마다 새로 계산되는 행동 점수가 아니라 **�
 - Vue Dashboard는 Spring Read-only API만 호출한다.
 - PostgreSQL 직접 연결을 금지한다.
 - 전체 활동은 `ALLOW / BLOCK / ERROR`를 모두 포함한다.
+- `OUTCOME_UNKNOWN`은 판정이 없으므로 `ALLOW / BLOCK / ERROR` 어디에도 넣지 않고 별도 수
+  (`outcomeUnknown`)로 집계하며, 목록에는 "결과 미확인"과 탐지 시각으로 표시한다. 숨기지 않는다.
 - 기본 정렬은 `requestedAt DESC`다.
 - 목록/상세 조회는 페이지네이션을 사용한다.
 - 위험 이벤트는 `riskFlagged=true` 또는 `HIGH/CRITICAL`로 필터링할 수 있다.
@@ -514,6 +534,8 @@ Prompt Risk는 Runtime마다 새로 계산되는 행동 점수가 아니라 **�
 - Credential / Secret / 원문 금융 데이터는 출력하지 않는다.
 - Exception Stack은 서버 로그에만 남기고 Agent 응답에 노출하지 않는다.
 - `requestedAt / completedAt`은 감사와 Behavior Window 계산에 사용한다.
+- `OUTCOME_UNKNOWN` 탐지·해소 로그에는 Request ID·Audit Event ID·Agent ID와 시각만 남긴다.
+  원본 Prompt·금융 응답·Credential은 남기지 않는다.
 
 ---
 
