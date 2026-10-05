@@ -332,44 +332,39 @@ function mapAgentExecution(agentRun, permission, execution) {
     }
   }
 
-  if (outcomeUnknown && status !== 'ERROR') {
-    return {
-      status,
-      outcomeUnknown,
-      title: 'AI 업무 결과 기록을 확인할 수 없습니다',
-      message: '일부 시도의 처리 결과가 감사 기록에 남지 않았습니다. 정상 완료로 처리하지 않았습니다.',
-      resultHeading: 'Agent 실행 결과',
-      resultItems: [
-        `정상 확인 ${allowedCount}건`,
-        `안전 차단 ${blockedCount}건`,
-        `처리 오류 ${errorCount}건`,
-        '결과 미확인 시도 있음',
-        `실행 사유 ${executionReasonCodes.join(' · ')}`,
-      ],
-      nextAction: '업무 기록에서 결과 미확인 건을 확인한 뒤 진행해 주세요.',
-      attempts,
-      agentRun,
-      permission,
-    }
-  }
+  const failed = status === 'ERROR' || errorCount > 0
+  // 결과 미확인은 오류와 다른 사실이다. 정상 완료로도, 일반 오류로도 보이지 않게 따로 안내한다.
+  const outcome = outcomeUnknown && status !== 'ERROR'
+    ? {
+        title: 'AI 업무 결과 기록을 확인할 수 없습니다',
+        message: '일부 시도의 처리 결과가 감사 기록에 남지 않았습니다. 정상 완료로 처리하지 않았습니다.',
+        extraItems: ['결과 미확인 시도 있음', `실행 사유 ${executionReasonCodes.join(' · ')}`],
+        nextAction: '업무 기록에서 결과 미확인 건을 확인한 뒤 진행해 주세요.',
+      }
+    : {
+        title: failed ? 'AI 업무 처리 중 오류가 발생했습니다' : 'AI 업무 처리가 완료되었습니다',
+        message: failed
+          ? '정상 완료로 처리하지 않았습니다. 아래 실행 사유와 업무 기록을 확인해 주세요.'
+          : 'Core Public API에서 확인한 Agent 실행 결과입니다.',
+        extraItems: executionReasonCodes.length ? [`오류 사유 ${executionReasonCodes.join(' · ')}`] : [],
+        nextAction: failed
+          ? '업무 기록에서 오류 사유를 확인한 뒤 재처리해 주세요.'
+          : '실행 결과를 검토하고 다음 심사 업무를 진행해 주세요.',
+      }
 
   return {
     status,
     outcomeUnknown,
-    title: status === 'ERROR' || errorCount ? 'AI 업무 처리 중 오류가 발생했습니다' : 'AI 업무 처리가 완료되었습니다',
-    message: status === 'ERROR' || errorCount
-      ? '정상 완료로 처리하지 않았습니다. 아래 실행 사유와 업무 기록을 확인해 주세요.'
-      : 'Core Public API에서 확인한 Agent 실행 결과입니다.',
+    title: outcome.title,
+    message: outcome.message,
     resultHeading: 'Agent 실행 결과',
     resultItems: [
       `정상 확인 ${allowedCount}건`,
       `안전 차단 ${blockedCount}건`,
       `처리 오류 ${errorCount}건`,
-      ...(executionReasonCodes.length ? [`오류 사유 ${executionReasonCodes.join(' · ')}`] : []),
+      ...outcome.extraItems,
     ],
-    nextAction: status === 'ERROR' || errorCount
-      ? '업무 기록에서 오류 사유를 확인한 뒤 재처리해 주세요.'
-      : '실행 결과를 검토하고 다음 심사 업무를 진행해 주세요.',
+    nextAction: outcome.nextAction,
     attempts,
     agentRun,
     permission,

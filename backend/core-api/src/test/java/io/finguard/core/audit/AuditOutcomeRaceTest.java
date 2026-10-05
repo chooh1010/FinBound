@@ -55,7 +55,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AuditOutcomeRaceTest {
 
-    private static final String AGENT = "LOAN-AGENT-01";
+    private static final String AGENT = AuditRows.AGENT;
     private static final long WAIT_SECONDS = 30;
 
     @Container
@@ -114,16 +114,17 @@ class AuditOutcomeRaceTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    private AuditRows rows;
+
     @BeforeEach
     void resetAuditEvents() {
-        jdbc.update("delete from audit_event_requested_data");
-        jdbc.update("delete from audit_event_reason_codes");
-        jdbc.update("delete from audit_events");
+        rows = new AuditRows(jdbc);
+        rows.reset();
     }
 
     @Test
     void anOutcomeThatLosesToReconciliationIsReReadAndResolved() throws Exception {
-        insertStaleProcessing("REQ-ORDERED");
+        rows.insertStaleProcessing("REQ-ORDERED");
         CountDownLatch outcomeHasReadProcessing = new CountDownLatch(1);
         CountDownLatch reconciliationCommitted = new CountDownLatch(1);
         PausingRepositoryConfig.READS.set(0);
@@ -141,15 +142,15 @@ class AuditOutcomeRaceTest {
                 CompletableFuture.supplyAsync(() -> outcomes.updateOutcome("REQ-ORDERED", allow(), AGENT));
         assertThat(outcomeHasReadProcessing.await(WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
         assertThat(reconciler.reconcileOnce()).isEqualTo(1);
-        assertThat(column("status", "REQ-ORDERED")).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(rows.text("status", "REQ-ORDERED")).isEqualTo("OUTCOME_UNKNOWN");
         reconciliationCommitted.countDown();
 
         AuditResponse response = outcome.get(WAIT_SECONDS, TimeUnit.SECONDS);
 
         assertThat(response.status()).isEqualTo(AuditStatus.COMPLETED);
-        assertThat(column("status", "REQ-ORDERED")).isEqualTo("COMPLETED");
-        assertThat(column("outcome_unknown_detected_at", "REQ-ORDERED")).isNotNull();
-        assertThat(column("outcome_resolved_at", "REQ-ORDERED")).isNotNull();
+        assertThat(rows.text("status", "REQ-ORDERED")).isEqualTo("COMPLETED");
+        assertThat(rows.text("outcome_unknown_detected_at", "REQ-ORDERED")).isNotNull();
+        assertThat(rows.text("outcome_resolved_at", "REQ-ORDERED")).isNotNull();
         assertThat(counter("audit.outcome.unknown.resolved") - resolvedBefore).isEqualTo(1.0);
         // 첫 읽기(PROCESSING) 뒤 충돌로 지고, 새 트랜잭션에서 다시 읽었다.
         assertThat(PausingRepositoryConfig.READS.get()).isGreaterThanOrEqualTo(2);
@@ -158,7 +159,7 @@ class AuditOutcomeRaceTest {
     /** 결과 반영은 자기 트랜잭션으로 커밋한다. 호출한 쪽의 트랜잭션이 롤백돼도 기록은 남는다. */
     @Test
     void anOuterRollbackDoesNotUndoTheRecordedOutcome() {
-        insertStaleProcessing("REQ-OUTER");
+        rows.insertStaleProcessing("REQ-OUTER");
         TransactionTemplate outer = new TransactionTemplate(transactionManager);
 
         outer.executeWithoutResult(status -> {
@@ -166,23 +167,7 @@ class AuditOutcomeRaceTest {
             status.setRollbackOnly();
         });
 
-        assertThat(column("status", "REQ-OUTER")).isEqualTo("COMPLETED");
-    }
-
-    private void insertStaleProcessing(String requestId) {
-        jdbc.update(
-                "insert into audit_events (audit_event_id, request_id, agent_id, agent_run_id, status,"
-                        + " requested_at, received_at, version)"
-                        + " values (?, ?, ?, 'RUN-T', 'PROCESSING', now() - interval '120 seconds',"
-                        + " now() - interval '120 seconds', 0)",
-                "AUD-" + requestId,
-                requestId,
-                AGENT);
-    }
-
-    private String column(String column, String requestId) {
-        return jdbc.queryForObject(
-                "select " + column + "::text from audit_events where request_id = ?", String.class, requestId);
+        assertThat(rows.text("status", "REQ-OUTER")).isEqualTo("COMPLETED");
     }
 
     private double counter(String name) {

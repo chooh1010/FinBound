@@ -50,7 +50,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AuditOutcomeApplyTableTest {
 
-    private static final String AGENT = "LOAN-AGENT-01";
+    private static final String AGENT = AuditRows.AGENT;
     private static final int RACE_ROWS = 40;
 
     @Container
@@ -70,48 +70,49 @@ class AuditOutcomeApplyTableTest {
     @Autowired
     private MeterRegistry meterRegistry;
 
+    private AuditRows rows;
+
     @BeforeEach
     void resetAuditEvents() {
-        jdbc.update("delete from audit_event_requested_data");
-        jdbc.update("delete from audit_event_reason_codes");
-        jdbc.update("delete from audit_events");
+        rows = new AuditRows(jdbc);
+        rows.reset();
     }
 
     @Test
     void aLateOutcomeResolvesAnUnknownRowAndKeepsTheDetectionTime() {
-        insertStaleProcessing("REQ-LATE");
+        rows.insertStaleProcessing("REQ-LATE");
         reconciler.reconcileOnce();
-        Instant detectedAt = timestamp("outcome_unknown_detected_at", "REQ-LATE");
+        Instant detectedAt = rows.instant("outcome_unknown_detected_at", "REQ-LATE");
         double before = counter("audit.outcome.unknown.resolved");
 
         AuditResponse response = outcomes.updateOutcome("REQ-LATE", allow(), AGENT);
 
         assertThat(response.status()).isEqualTo(AuditStatus.COMPLETED);
-        assertThat(column("status", "REQ-LATE")).isEqualTo("COMPLETED");
-        assertThat(timestamp("outcome_unknown_detected_at", "REQ-LATE")).isEqualTo(detectedAt);
-        assertThat(timestamp("outcome_resolved_at", "REQ-LATE")).isNotNull();
+        assertThat(rows.text("status", "REQ-LATE")).isEqualTo("COMPLETED");
+        assertThat(rows.instant("outcome_unknown_detected_at", "REQ-LATE")).isEqualTo(detectedAt);
+        assertThat(rows.instant("outcome_resolved_at", "REQ-LATE")).isNotNull();
         assertThat(counter("audit.outcome.unknown.resolved") - before).isEqualTo(1.0);
     }
 
     @Test
     void theSameOutcomeAfterResolutionIsIdempotent() {
-        insertStaleProcessing("REQ-AGAIN");
+        rows.insertStaleProcessing("REQ-AGAIN");
         reconciler.reconcileOnce();
         AuditOutcomeRequest outcome = allow();
         outcomes.updateOutcome("REQ-AGAIN", outcome, AGENT);
-        long version = version("REQ-AGAIN");
-        Instant resolvedAt = timestamp("outcome_resolved_at", "REQ-AGAIN");
+        long version = rows.version("REQ-AGAIN");
+        Instant resolvedAt = rows.instant("outcome_resolved_at", "REQ-AGAIN");
 
         AuditResponse repeated = outcomes.updateOutcome("REQ-AGAIN", outcome, AGENT);
 
         assertThat(repeated.status()).isEqualTo(AuditStatus.COMPLETED);
-        assertThat(version("REQ-AGAIN")).isEqualTo(version);
-        assertThat(timestamp("outcome_resolved_at", "REQ-AGAIN")).isEqualTo(resolvedAt);
+        assertThat(rows.version("REQ-AGAIN")).isEqualTo(version);
+        assertThat(rows.instant("outcome_resolved_at", "REQ-AGAIN")).isEqualTo(resolvedAt);
     }
 
     @Test
     void aDifferentOutcomeAfterFinalizationIsAConflict() {
-        insertStaleProcessing("REQ-CONFLICT");
+        rows.insertStaleProcessing("REQ-CONFLICT");
         outcomes.updateOutcome("REQ-CONFLICT", allow(), AGENT);
         double before = counter("audit.outcome.conflict");
 
@@ -119,20 +120,20 @@ class AuditOutcomeApplyTableTest {
                 .isInstanceOf(AuditOperationException.class)
                 .extracting("kind")
                 .isEqualTo(AuditOperationException.Kind.DUPLICATE);
-        assertThat(column("decision", "REQ-CONFLICT")).isEqualTo("ALLOW");
+        assertThat(rows.text("decision", "REQ-CONFLICT")).isEqualTo("ALLOW");
         assertThat(counter("audit.outcome.conflict") - before).isEqualTo(1.0);
     }
 
     @Test
     void anotherAgentCannotResolveTheRow() {
-        insertStaleProcessing("REQ-OWNER");
+        rows.insertStaleProcessing("REQ-OWNER");
         reconciler.reconcileOnce();
 
         assertThatThrownBy(() -> outcomes.updateOutcome("REQ-OWNER", allow(), "OTHER-AGENT"))
                 .isInstanceOf(AuditOperationException.class)
                 .extracting("kind")
                 .isEqualTo(AuditOperationException.Kind.NOT_FOUND);
-        assertThat(column("status", "REQ-OWNER")).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(rows.text("status", "REQ-OWNER")).isEqualTo("OUTCOME_UNKNOWN");
     }
 
     /**
@@ -144,7 +145,7 @@ class AuditOutcomeApplyTableTest {
         Instant base = Instant.now().truncatedTo(ChronoUnit.MICROS);
         for (long nanos : new long[] {789, 123}) {
             String requestId = "REQ-NANOS-" + nanos;
-            insertStaleProcessing(requestId);
+            rows.insertStaleProcessing(requestId);
             Instant completedAt = base.plusNanos(nanos);
             outcomes.updateOutcome(requestId, allowAt(completedAt), AGENT);
 
@@ -164,7 +165,7 @@ class AuditOutcomeApplyTableTest {
         List<String> requestIds = new ArrayList<>();
         for (int i = 0; i < RACE_ROWS; i++) {
             String requestId = "REQ-RACE-" + i;
-            insertStaleProcessing(requestId);
+            rows.insertStaleProcessing(requestId);
             requestIds.add(requestId);
         }
         ExecutorService pool = Executors.newFixedThreadPool(8);
@@ -203,37 +204,6 @@ class AuditOutcomeApplyTableTest {
             assertThat(row.get("outcome_unknown_detected_at") == null)
                     .isEqualTo(row.get("outcome_resolved_at") == null);
         });
-    }
-
-    private void insertStaleProcessing(String requestId) {
-        jdbc.update(
-                "insert into audit_events (audit_event_id, request_id, agent_id, agent_run_id, status,"
-                        + " requested_at, received_at, version)"
-                        + " values (?, ?, ?, 'RUN-T', 'PROCESSING', now() - interval '120 seconds',"
-                        + " now() - interval '120 seconds', 0)",
-                "AUD-" + requestId,
-                requestId,
-                AGENT);
-    }
-
-    private String column(String column, String requestId) {
-        return jdbc.queryForObject(
-                "select " + column + " from audit_events where request_id = ?", String.class, requestId);
-    }
-
-    private Instant timestamp(String column, String requestId) {
-        java.sql.Timestamp value =
-                jdbc.queryForObject(
-                        "select " + column + " from audit_events where request_id = ?",
-                        java.sql.Timestamp.class,
-                        requestId);
-        return value == null ? null : value.toInstant();
-    }
-
-    private long version(String requestId) {
-        Long version =
-                jdbc.queryForObject("select version from audit_events where request_id = ?", Long.class, requestId);
-        return version == null ? -1 : version;
     }
 
     private double counter(String name) {

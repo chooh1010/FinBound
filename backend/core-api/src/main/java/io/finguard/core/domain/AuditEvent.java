@@ -457,8 +457,8 @@ public class AuditEvent {
         return completion.systemOutcome() == status
                 && completion.decision() == decision
                 && Set.copyOf(completion.reasonCodes()).equals(Set.copyOf(reasonCodes))
-                && Boolean.valueOf(completion.downstreamReached()).equals(downstreamReached)
-                && Boolean.valueOf(completion.responseReleased()).equals(responseReleased)
+                && Objects.equals(completion.downstreamReached(), downstreamReached)
+                && Objects.equals(completion.responseReleased(), responseReleased)
                 && Objects.equals(completion.success(), success)
                 && Objects.equals(completion.recordsRead(), recordsRead)
                 && Objects.equals(completion.latencyMs(), latencyMs)
