@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.dao.DataAccessException;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -120,8 +121,16 @@ public class PolicyReevaluationService {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void markInterruptedRuns() {
-        int interrupted = jdbc.update("update policy_reevaluation_runs set status = 'FAILED', failure = 'INTERRUPTED'"
-                + " where status = 'RUNNING'");
+        int interrupted;
+        try {
+            interrupted = jdbc.update("update policy_reevaluation_runs set status = 'FAILED',"
+                    + " failure = 'INTERRUPTED' where status = 'RUNNING'");
+        } catch (DataAccessException exception) {
+            // 정리 작업이 기동을 막지 않는다(예: 스키마를 만들지 않는 DDL 추출 컨텍스트). 남은 실행은 재개 API로 다룬다.
+            log.warn("Could not check for interrupted policy reevaluation runs: {}",
+                    exception.getClass().getSimpleName());
+            return;
+        }
         if (interrupted > 0) {
             log.warn("Marked {} interrupted policy reevaluation runs as FAILED (resumable)", interrupted);
         }
