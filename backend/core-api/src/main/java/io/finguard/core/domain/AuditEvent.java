@@ -161,6 +161,14 @@ public class AuditEvent {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /** Core가 결과 미도착을 처음 기록한 시각. 한 번 남으면 바뀌지 않는다 — docs/06 §10. */
+    @Column(name = "outcome_unknown_detected_at")
+    private Instant outcomeUnknownDetectedAt;
+
+    /** OUTCOME_UNKNOWN이던 행이 늦게 온 결과로 확정된 시각. */
+    @Column(name = "outcome_resolved_at")
+    private Instant outcomeResolvedAt;
+
     /**
      * 낙관적 락. 한 감사 기록에 쓰는 주체가 선저장·증거 기록·최종 결과로 늘어나므로, 겹쳐 쓸 때
      * Hibernate의 전체 엔티티 UPDATE가 다른 쪽이 방금 쓴 칸을 옛 값으로 되돌리는 것을 막는다.
@@ -371,6 +379,14 @@ public class AuditEvent {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    public Instant getOutcomeUnknownDetectedAt() {
+        return outcomeUnknownDetectedAt;
+    }
+
+    public Instant getOutcomeResolvedAt() {
+        return outcomeResolvedAt;
     }
 
     /** PROCESSING 기록에 최종 결과를 한 번만 적용한다. 감사 증거의 사후 덮어쓰기를 허용하지 않는다. */

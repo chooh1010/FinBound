@@ -34,6 +34,8 @@ public enum ReasonCode {
     POLICY_ENGINE_UNAVAILABLE,
     POLICY_DECISION_INVALID,
     AUDIT_WRITE_FAILED,
+    /** Core가 붙이는 코드다. 결과 기록이 도착하지 않은 시도가 있는 실행에 표시한다 — docs/04 §3. */
+    AUDIT_OUTCOME_UNKNOWN,
     SECURITY_EVENT_WRITE_FAILED,
     DOWNSTREAM_ERROR,
     DOWNSTREAM_TIMEOUT,

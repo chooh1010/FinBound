@@ -57,7 +57,7 @@ class DomainEnumContractTest {
                 .containsExactly("CREATED", "RUNNING", "COMPLETED", "FAILED"); // §9
         assertThat(AuditStatus.values())
                 .extracting(Enum::name)
-                .containsExactly("PROCESSING", "COMPLETED", "ERROR"); // §10
+                .containsExactly("PROCESSING", "COMPLETED", "ERROR", "OUTCOME_UNKNOWN"); // §10
     }
 
     @Test

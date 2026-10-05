@@ -565,6 +565,41 @@ class AuditPersistenceApiTest {
                 """);
     }
 
+    /** OUTCOME_UNKNOWN은 Core만 기록한다. Gateway가 보내면 지어낸 도달 여부·완료 시각과 함께 저장된다. */
+    @Test
+    void rejectsOutcomeUnknownFromTheGateway() {
+        assertOutcomeRejected(
+                """
+                {
+                  "systemOutcome": "OUTCOME_UNKNOWN",
+                  "reasonCodes": [],
+                  "downstreamReached": false,
+                  "responseReleased": false,
+                  "completedAt": "%s"
+                }
+                """);
+    }
+
+    /** 사유 코드 하나만 빼면 통과하는 요청이어야 이 검증을 시험한다 — 다른 이유로 400이 나면 안 된다. */
+    @Test
+    void rejectsTheCoreOnlyReasonCodeFromTheGateway() {
+        assertOutcomeRejected(
+                """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "ERROR",
+                  "reasonCodes": ["AUDIT_OUTCOME_UNKNOWN"],
+                  "downstreamReached": true,
+                  "responseReleased": false,
+                  "success": false,
+                  "errorLocation": "MOCK_FINANCE",
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s"
+                }
+                """);
+    }
+
     @Test
     void doesNotAllowAFinalAuditToBeOverwritten() {
         String requestId = requestId();
