@@ -355,6 +355,40 @@ describe('FinBound P0 application', () => {
     expect(events.every((event) => ['ALLOW', 'BLOCK'].includes(event.decision))).toBe(true)
   })
 
+  it('renders an outcome-unknown audit record as unknown with its detection time', async () => {
+    const unknown = mapAuditEvent({
+      auditEventId: 'AUD-UNKNOWN',
+      requestId: 'REQ-UNKNOWN',
+      agentId: 'LOAN-AGENT-01',
+      agentRunId: 'RUN-UNKNOWN',
+      status: 'OUTCOME_UNKNOWN',
+      reasonCodes: [],
+      requestedAt: '2026-09-03T10:00:00+09:00',
+      outcomeUnknownDetectedAt: '2026-09-03T10:01:05+09:00',
+    })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, error: 0, outcomeUnknown: 1 })
+    vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
+      items: [unknown],
+      page: 1,
+      pageSize: 5,
+      totalItems: 1,
+      totalPages: 1,
+      filterOptions: { agentIds: [], caseIds: [], consumerIds: [], tools: [], reasonCodes: [] },
+    })
+    vi.spyOn(finboundApi, 'getAuditEvent').mockResolvedValue(unknown)
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-screen="dashboard"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.event-row .status-badge').text()).toBe('결과 미확인')
+    expect(wrapper.get('.event-row .status-badge').classes()).toContain('status-outcome_unknown')
+    expect(wrapper.get('.metric-outcome-unknown strong').text()).toBe('1')
+    expect(wrapper.get('.event-detail').text()).toContain('결과 미확인 탐지')
+    expect(wrapper.get('.event-detail').text()).toContain('2026-09-03T10:01:05+09:00')
+    expect(wrapper.get('.event-detail').text()).not.toContain('차단 사유 없음')
+  })
+
   it('renders a processing audit record without treating a null decision as an error', async () => {
     const processing = mapAuditEvent({
       auditEventId: 'AUD-PROCESSING',
@@ -366,7 +400,7 @@ describe('FinBound P0 application', () => {
       behaviorRisk: 0,
       requestedAt: '2026-09-03T10:00:00+09:00',
     })
-    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, error: 0 })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, error: 0, outcomeUnknown: 0 })
     vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
       items: [processing],
       page: 1,
@@ -472,7 +506,7 @@ describe('FinBound P0 application', () => {
       requestedData: ['CREDIT_SCORE'],
       requestedAt: '2026-09-03T10:00:00+09:00',
     })
-    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, error: 1 })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, error: 1, outcomeUnknown: 0 })
     vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
       items: [timeout],
       page: 1,
@@ -507,7 +541,8 @@ describe('FinBound P0 application', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('안전 현황 요약을 불러오지 못했습니다')
-    expect(wrapper.findAll('.metric-grid strong').map((node) => node.text())).toEqual(['—', '—', '—', '—'])
+    // 전체·정상·차단·오류·결과 미확인 다섯 칸 모두 값 대신 자리표시가 남는다.
+    expect(wrapper.findAll('.metric-grid strong').map((node) => node.text())).toEqual(['—', '—', '—', '—', '—'])
     expect(wrapper.findAll('.event-row').length).toBeGreaterThan(0)
     expect(wrapper.text()).not.toContain('안전 현황 요약을 불러오지 못했습니다. 연결 상태와 조회 권한을 확인해 주세요.0')
   })
@@ -619,7 +654,7 @@ describe('FinBound P0 application', () => {
       behaviorRisk: 0.1,
       requestedAt: '2026-09-03T10:00:00+09:00',
     })
-    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 1, block: 0, error: 0 })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 1, block: 0, error: 0, outcomeUnknown: 0 })
     vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
       items: [promptAlert],
       page: 1,

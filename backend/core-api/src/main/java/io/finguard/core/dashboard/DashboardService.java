@@ -41,7 +41,8 @@ public class DashboardService {
         long error = auditEvents.countByStatus(AuditStatus.ERROR);
         long allow = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.ALLOW);
         long block = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.BLOCK);
-        return new DashboardSummaryResponse(total, allow, block, error);
+        long outcomeUnknown = auditEvents.countByStatus(AuditStatus.OUTCOME_UNKNOWN);
+        return new DashboardSummaryResponse(total, allow, block, error, outcomeUnknown);
     }
 
     public AuditEventPageResponse findEvents(AuditEventQuery query, int page, int pageSize) {

@@ -203,6 +203,9 @@ Viewer는 Dashboard와 같은 읽기 전용 범위에서 전체 실행을 조회
 - `FAILED`는 AuditEvent가 없어도 반환한다. Core가 Agent를 호출하지 못한 실패를 화면에서
   영구 `RUNNING`으로 오인하지 않기 위해서다.
 - `RUNNING`에서는 완료되지 않은 PROCESSING AuditEvent를 `attempts`에 싣지 않는다.
+- `OUTCOME_UNKNOWN` AuditEvent도 결과가 없으므로 `attempts`에 싣지 않는다. 대신 실행의
+  `reasonCodes`에 `AUDIT_OUTCOME_UNKNOWN`을 넣어, 시도가 0건인 "완료"로 보이지 않게 한다.
+  결과가 늦게 도착해 확정되면 그 시도는 `attempts`에 나타나고 이 코드는 빠진다.
 - 정책 판정 전 시스템 오류는 `systemOutcome=ERROR`이고 `decision`을 생략할 수 있다.
 - Downstream 오류는 `decision=ALLOW`, `systemOutcome=ERROR`가 될 수 있다.
 - 응답은 식별자·권한 증거·판정·시각만 포함한다. 원본 Prompt, 금융 문서, 금융 응답,
@@ -850,6 +853,31 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 
 `errorLocation`은 `^[A-Z][A-Z0-9_]*$` 형식이다.
 
+`systemOutcome`은 `COMPLETED | ERROR`만 받는다. `PROCESSING`과 `OUTCOME_UNKNOWN`은 `400`으로
+거부한다 — `OUTCOME_UNKNOWN`은 Core만 기록하는 상태다(docs/06 §10).
+
+#### 행 상태별 처리 (적용표)
+
+| 행 상태 | 들어온 결과 | 응답 | 처리 |
+|---|---|---|---|
+| `PROCESSING` | `COMPLETED \| ERROR` | `200` | 정상 확정 |
+| `OUTCOME_UNKNOWN` | `COMPLETED \| ERROR` | `200` | **해소** — 확정하고 `outcomeResolvedAt`을 남긴다. `outcomeUnknownDetectedAt`은 그대로 둔다 |
+| 같은 결과로 이미 확정 | 같은 결과 | `200` | 멱등 성공. 아무것도 바꾸지 않는다 |
+| 다른 결과로 이미 확정 | 다른 결과 | `409 DUPLICATE_REQUEST` | 저장하지 않고 경보 로그·`audit.outcome.conflict` 지표를 남긴다 |
+| 행 없음 / 검증된 Agent와 행의 Agent 불일치 | — | `404` | 존재 여부를 더 설명하지 않는다 |
+
+검사 순서: 요청 본문 형식 검증(필수 값·`systemOutcome` 허용값 등, `400`) → 행 존재·Agent 일치(`404`) →
+결과 불변식(BLOCK의 측정값 금지 등, `400`) → 위 표. 그래서 형식이 틀린 본문은 행이 없어도 `400`이다.
+
+"같은 결과"는 결과 필드 전부(판정, 시스템 결과, 사유 코드 집합, Downstream 도달, 응답 제공, 성공,
+읽은 건수, 지연, 오류 위치, Behavior 위험, Severity, riskFlagged, 정책 버전, `completedAt`)가 같다는
+뜻이다. 저장소가 줄이는 정밀도에 맞춰 비교한다 — `completedAt`은 마이크로초로 반올림, Behavior 위험은
+소수 넷째 자리로 반올림.
+
+같은 행을 Core의 조정 배치가 동시에 `OUTCOME_UNKNOWN`으로 바꾸면 낙관적 잠금이 한쪽만 이기게 한다.
+결과 쪽이 지면 새 트랜잭션에서 다시 읽고 위 표대로 다시 판단한다(그 행은 이제 해소된다). 결과가
+조용히 버려지거나 행이 `PROCESSING`으로 되살아나지 않는다.
+
 ```json
 {
   "decision": "ALLOW",
@@ -1071,6 +1099,27 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 }
 ```
 
+결과 기록이 도착하지 않은 행은 Core가 `OUTCOME_UNKNOWN`으로 바꾼다. 결과 필드는 비어 있고
+탐지 시각만 있다(`contracts/audit/audit-event.schema.json`, docs/06 §10).
+
+```json
+{
+  "auditEventId": "AUD-002",
+  "requestId": "REQ-002",
+  "traceId": "4bf92f0000000002",
+  "agentId": "LOAN-AGENT-01",
+  "agentRunId": "RUN-002",
+  "requestedTool": "CREDIT_SCORE_READ",
+  "reasonCodes": [],
+  "status": "OUTCOME_UNKNOWN",
+  "requestedAt": "2026-08-17T21:32:10+09:00",
+  "outcomeUnknownDetectedAt": "2026-08-17T21:33:15+09:00"
+}
+```
+
+늦게 도착한 결과로 확정된 행은 `status`가 `COMPLETED | ERROR`이고 `outcomeUnknownDetectedAt`과
+`outcomeResolvedAt`을 함께 가진다.
+
 ### SecurityAuthEvent
 
 ```json
@@ -1099,6 +1148,10 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 | `GET /api/v1/agent-runs/{agentRunId}/permission-comparison` | Viewer 또는 Operator |
 
 Vue는 PostgreSQL을 직접 조회하지 않는다.
+
+`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `error`, `outcomeUnknown`을 반환한다.
+`total`은 나머지의 합과 같지 않을 수 있다 — 진행 중인 `PROCESSING`은 `total`에만 들어간다.
+`outcomeUnknown`은 판정이 없으므로 `allow`·`block`에 넣지 않는다.
 
 `GET /api/v1/audit-events`는 기본 필터와 함께 `severity=LOW|MEDIUM|HIGH|CRITICAL`,
 `riskOnly=true`를 지원한다. 두 값은 Prompt/Behavior 점수에서 Dashboard가 다시 계산하지 않고,
@@ -1131,3 +1184,8 @@ OPA 판정 시점에 기록된 `severity`와 `riskFlagged` 감사 필드를 사�
 ```
 
 Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 않아야 한다.
+
+결과 기록의 멱등성은 이와 별개다. Gateway가 결과 기록 응답을 받지 못해(시간 초과 등) 같은 결과를
+다시 보내면, 첫 요청이 실제로는 커밋됐더라도 `200`을 받는다(§11 적용표). 시간 초과는 기록 실패를
+뜻하지 않는다 — Core가 요청을 늦게 처리해 커밋할 수 있다. 결과 기록의 최종 판단 근거는 Core의 감사
+행뿐이고, 끝내 도착하지 않은 결과는 Core의 조정 배치가 `OUTCOME_UNKNOWN`으로 드러낸다(docs/06 §10).

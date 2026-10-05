@@ -1,6 +1,6 @@
 # Audit
 
-Backend 3이 Schema와 Runtime Event Contract를 주도하고 Backend 1 Core가 저장을 담당하는 공통 영역입니다. `ToolCallAttempt`와 `ExecutionOutcome`을 분리하고 인증 성공 후 생성한 Business AuditEvent를 `PROCESSING → COMPLETED | ERROR`로 완성합니다. 인증 실패는 Business Audit이 아닌 최소 `SecurityAuthEvent`로 기록합니다.
+Backend 3이 Schema와 Runtime Event Contract를 주도하고 Backend 1 Core가 저장을 담당하는 공통 영역입니다. `ToolCallAttempt`와 `ExecutionOutcome`을 분리하고 인증 성공 후 생성한 Business AuditEvent를 `PROCESSING → COMPLETED | ERROR`로 완성합니다. 결과 기록이 도착하지 않으면 Core가 `OUTCOME_UNKNOWN`으로 드러내고, 늦게 도착한 결과로 확정할 때도 탐지 시각을 남깁니다. 인증 실패는 Business Audit이 아닌 최소 `SecurityAuthEvent`로 기록합니다.
 
 저장: 식별자, ScopeStatus, Risk/Version, PolicyDecision, downstream/response 상태, Reason Code.
 
@@ -14,7 +14,7 @@ Backend 3이 Schema와 Runtime Event Contract를 주도하고 Backend 1 Core가 
 |---|---|
 | `ToolCallAttempt` | Risk 평가 전 현재 요청. `success`, `recordsRead`, `latencyMs` 같은 미래값 금지 |
 | `ExecutionOutcome` | Policy Decision과 시스템 실행 결과를 분리한 최종 결과 |
-| `AuditEvent` | 인증 성공 후 생성하는 Business Audit의 `PROCESSING / COMPLETED / ERROR` 상태 |
+| `AuditEvent` | 인증 성공 후 생성하는 Business Audit의 `PROCESSING / COMPLETED / ERROR / OUTCOME_UNKNOWN` 상태. `OUTCOME_UNKNOWN`은 결과 필드 없이 탐지 시각만 가진다 |
 | `SecurityAuthEvent` | 인증 실패 시 Business Audit 대신 남기는 최소 보안 Event |
 
 검증 실행:

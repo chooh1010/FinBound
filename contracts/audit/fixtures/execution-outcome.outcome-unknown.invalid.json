@@ -1,0 +1,8 @@
+{
+  "requestId": "REQ-002",
+  "systemOutcome": "OUTCOME_UNKNOWN",
+  "reasonCodes": [],
+  "downstreamReached": false,
+  "responseReleased": false,
+  "completedAt": "2026-08-17T21:32:11+09:00"
+}

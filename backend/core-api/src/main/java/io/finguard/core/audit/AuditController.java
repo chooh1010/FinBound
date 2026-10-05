@@ -20,9 +20,11 @@ public class AuditController {
     private static final String VERIFIED_AGENT_HEADER = "X-Verified-Agent-Id";
 
     private final AuditService service;
+    private final AuditOutcomeService outcomeService;
 
-    public AuditController(AuditService service) {
+    public AuditController(AuditService service, AuditOutcomeService outcomeService) {
         this.service = service;
+        this.outcomeService = outcomeService;
     }
 
     @PostMapping("/internal/v1/audits")
@@ -38,6 +40,6 @@ public class AuditController {
             @PathVariable String requestId,
             @RequestHeader(VERIFIED_AGENT_HEADER) String verifiedAgentId,
             @Valid @RequestBody AuditOutcomeRequest request) {
-        return ResponseEntity.ok(service.updateOutcome(requestId, request, verifiedAgentId));
+        return ResponseEntity.ok(outcomeService.updateOutcome(requestId, request, verifiedAgentId));
     }
 }

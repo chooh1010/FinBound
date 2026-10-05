@@ -22,7 +22,8 @@ public record AuditCompletion(
         Instant completedAt) {
 
     public AuditCompletion {
-        if (systemOutcome == null || systemOutcome == AuditStatus.PROCESSING) {
+        // OUTCOME_UNKNOWN은 결과가 아니라 결과 부재다. 결과 적용 경로로 들어오면 안 된다.
+        if (systemOutcome == null || !systemOutcome.isOutcomeInput()) {
             throw new IllegalArgumentException("Audit completion requires a final system outcome");
         }
         if (systemOutcome == AuditStatus.COMPLETED && decision == null) {

@@ -48,6 +48,15 @@ class AuditEventCompletionTest {
         assertThat(event.getLatencyMs()).isEqualTo(120L);
     }
 
+    /** 결과 부재(OUTCOME_UNKNOWN)는 결과 적용 경로로 들어올 수 없다. DTO 검증을 우회해도 막힌다. */
+    @Test
+    void outcomeUnknownIsNotACompletion() {
+        assertThatThrownBy(() -> completion(null, AuditStatus.OUTCOME_UNKNOWN,
+                        Set.of(), false, false, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("final system outcome");
+    }
+
     /**
      * {@code contracts/audit/execution-outcome.schema.json}:48-104의 조건부 불변식. DTO에서도 막지만
      * 도메인에도 둔다 — 기존 패턴이고, 이 record를 직접 만드는 경로가 검증을 우회하면 안 된다.

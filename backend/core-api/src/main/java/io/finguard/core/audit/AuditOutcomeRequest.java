@@ -37,9 +37,19 @@ public record AuditOutcomeRequest(
         reasonCodes = reasonCodes == null ? null : Set.copyOf(reasonCodes);
     }
 
+    /**
+     * "PROCESSING이 아니면 통과"로 두면 OUTCOME_UNKNOWN이 정상 결과 경로로 들어와, 지어낸
+     * 도달 여부·완료 시각과 함께 저장된다. 받을 수 있는 값을 열거해 막는다.
+     */
     @AssertTrue(message = "systemOutcome must be COMPLETED or ERROR")
     public boolean isFinalOutcome() {
-        return systemOutcome == null || systemOutcome != AuditStatus.PROCESSING;
+        return systemOutcome == null || systemOutcome.isOutcomeInput();
+    }
+
+    /** 결과를 아는 쪽이 "결과를 모른다"는 사유를 붙일 수는 없다. 이 코드는 Core만 붙인다. */
+    @AssertTrue(message = "AUDIT_OUTCOME_UNKNOWN is assigned by Core only")
+    public boolean isWithoutCoreOnlyReason() {
+        return reasonCodes == null || !reasonCodes.contains(ReasonCode.AUDIT_OUTCOME_UNKNOWN);
     }
 
     @AssertTrue(message = "COMPLETED requires a policy decision")

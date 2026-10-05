@@ -1,0 +1,68 @@
+# F1 baseline reproduction overlay (personal extension, not for the team stack).
+#
+# Purpose: show what happens today when the audit outcome write fails.
+# The gateway reaches core-api through a WireMock proxy that forwards every call
+# except the outcome PATCH, which it answers with 503. Nothing else changes.
+#
+#   docker compose -p finguard-f1 --env-file <f1.env outside the repo> \
+#     -f ../docker-compose.yml -f ../docker-compose.demo.yml \
+#     -f ../docker-compose.expose.yml -f docker-compose.f1-repro.yml up -d --build --wait
+#
+# Relative paths resolve against infrastructure/ (the first -f file), not this directory.
+# ai-risk is included so the prompt risk snapshot is EVALUATED and the ALLOW path runs.
+services:
+  ai-risk:
+    build:
+      context: ../ai-risk
+    entrypoint:
+      - /bin/sh
+      - /opt/finguard/with-secrets.sh
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+    environment:
+      FINGUARD_REQUIRED_SECRETS: FINGUARD_INTERNAL_CREDENTIAL
+    secrets:
+      - source: internal-credential
+        target: FINGUARD_INTERNAL_CREDENTIAL
+    volumes:
+      - ./docker/with-secrets.sh:/opt/finguard/with-secrets.sh:ro
+    expose: ["8000"]
+    mem_limit: ${AI_RISK_MEM_LIMIT:-1g}
+    restart: unless-stopped
+    networks: [internal-zone]
+    security_opt: [no-new-privileges:true]
+
+  core-proxy:
+    image: wiremock/wiremock:3.13.1
+    command: ["--port", "8080", "--disable-banner", "--no-request-journal"]
+    volumes:
+      - ./f1/wiremock:/home/wiremock:ro
+    expose: ["8080"]
+    mem_limit: 256m
+    depends_on:
+      core-api:
+        condition: service_healthy
+    networks: [internal-zone]
+
+  core-api:
+    environment:
+      AI_RISK_URL: http://ai-risk:8000
+    depends_on:
+      ai-risk:
+        condition: service_healthy
+
+  gateway:
+    environment:
+      CORE_URL: http://core-proxy:8080
+      AI_URL: http://ai-risk:8000
+      SPRING_PROFILES_ACTIVE: real-core,real-ai,real-downstream
+    depends_on:
+      ai-risk:
+        condition: service_healthy
+      core-proxy:
+        condition: service_started

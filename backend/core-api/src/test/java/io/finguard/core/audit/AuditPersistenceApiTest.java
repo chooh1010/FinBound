@@ -565,6 +565,41 @@ class AuditPersistenceApiTest {
                 """);
     }
 
+    /** OUTCOME_UNKNOWN은 Core만 기록한다. Gateway가 보내면 지어낸 도달 여부·완료 시각과 함께 저장된다. */
+    @Test
+    void rejectsOutcomeUnknownFromTheGateway() {
+        assertOutcomeRejected(
+                """
+                {
+                  "systemOutcome": "OUTCOME_UNKNOWN",
+                  "reasonCodes": [],
+                  "downstreamReached": false,
+                  "responseReleased": false,
+                  "completedAt": "%s"
+                }
+                """);
+    }
+
+    /** 사유 코드 하나만 빼면 통과하는 요청이어야 이 검증을 시험한다 — 다른 이유로 400이 나면 안 된다. */
+    @Test
+    void rejectsTheCoreOnlyReasonCodeFromTheGateway() {
+        assertOutcomeRejected(
+                """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "ERROR",
+                  "reasonCodes": ["AUDIT_OUTCOME_UNKNOWN"],
+                  "downstreamReached": true,
+                  "responseReleased": false,
+                  "success": false,
+                  "errorLocation": "MOCK_FINANCE",
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s"
+                }
+                """);
+    }
+
     @Test
     void doesNotAllowAFinalAuditToBeOverwritten() {
         String requestId = requestId();
@@ -584,13 +619,62 @@ class AuditPersistenceApiTest {
                 """
                         .formatted(COMPLETED_AT);
         ResponseEntity<JsonNode> first = updateOutcome(requestId, "LOAN-AGENT-01", outcome);
+        // 확정된 BLOCK을 ALLOW로 바꾸려는 다른 결과. 감사 증거의 사후 덮어쓰기다.
+        String different =
+                """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "COMPLETED",
+                  "reasonCodes": [],
+                  "downstreamReached": true,
+                  "responseReleased": true,
+                  "success": true,
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s"
+                }
+                """
+                        .formatted(COMPLETED_AT);
 
-        ResponseEntity<JsonNode> duplicate = updateOutcome(requestId, "LOAN-AGENT-01", outcome);
+        ResponseEntity<JsonNode> conflict = updateOutcome(requestId, "LOAN-AGENT-01", different);
 
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(duplicate.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(duplicate.getBody()).isNotNull();
-        assertThat(duplicate.getBody().get("reasonCode").asText()).isEqualTo("DUPLICATE_REQUEST");
+        assertThat(conflict.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(conflict.getBody()).isNotNull();
+        assertThat(conflict.getBody().get("reasonCode").asText()).isEqualTo("DUPLICATE_REQUEST");
+        assertThat(jdbcDecision(requestId)).isEqualTo("BLOCK");
+    }
+
+    /**
+     * Gateway가 시간 초과 뒤 같은 결과를 다시 보내는 경우. 단위 0 Run B처럼 첫 요청이 실제로는
+     * 커밋됐을 수 있다 — 그때 409를 주면 Gateway는 실패로 오인한다. 같은 결과면 멱등 성공이다.
+     */
+    @Test
+    void acceptsTheSameOutcomeAgainWithoutChangingTheRecord() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+        String outcome =
+                """
+                {
+                  "decision": "BLOCK",
+                  "systemOutcome": "COMPLETED",
+                  "reasonCodes": ["CASE_SCOPE_VIOLATION"],
+                  "downstreamReached": false,
+                  "responseReleased": false,
+                  "severity": "CRITICAL",
+                  "riskFlagged": true,
+                  "completedAt": "%s"
+                }
+                """
+                        .formatted(COMPLETED_AT);
+        updateOutcome(requestId, "LOAN-AGENT-01", outcome);
+        long versionAfterFirst = jdbcVersion(requestId);
+
+        ResponseEntity<JsonNode> repeated = updateOutcome(requestId, "LOAN-AGENT-01", outcome);
+
+        assertThat(repeated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(repeated.getBody().get("status").asText()).isEqualTo("COMPLETED");
+        assertThat(jdbcVersion(requestId)).isEqualTo(versionAfterFirst);
     }
 
     @Test
@@ -767,6 +851,17 @@ class AuditPersistenceApiTest {
                 "select count(*) from security_auth_events where request_id = ?",
                 Integer.class,
                 requestId);
+    }
+
+    private String jdbcDecision(String requestId) {
+        return jdbcTemplate.queryForObject(
+                "select decision from audit_events where request_id = ?", String.class, requestId);
+    }
+
+    private long jdbcVersion(String requestId) {
+        Long version = jdbcTemplate.queryForObject(
+                "select version from audit_events where request_id = ?", Long.class, requestId);
+        return version == null ? -1 : version;
     }
 
     private String auditStatus(String requestId) {

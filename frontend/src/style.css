@@ -66,6 +66,7 @@ main { min-width: 0; padding: 29px clamp(24px, 4vw, 52px) 60px; }
 .status-block, .status-violation, .status-critical { color: #b72c3d; background: #ffe9ec; }
 .status-error, .status-high, .status-alert { color: #986008; background: #fff2d9; }
 .status-processing, .status-unknown { color: #42638e; background: #edf3fb; }
+.status-outcome_unknown { color: #986008; background: #fff2d9; }
 
 .agent-workspace { width: min(100%, 1420px); margin: 0 auto; }
 .work-catalog { padding: 20px; }
@@ -208,7 +209,7 @@ dd { margin: 5px 0 0; color: #26334b; font-size: .75rem; font-weight: 650; }
 .dashboard-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .dashboard-intro h2 { font-size: 1.3rem; }.dashboard-intro p:last-child { margin: 6px 0 0; color: var(--muted); font-size: .68rem; }
 .dashboard-update { display: inline-flex; align-items: center; gap: 7px; color: #64738a; font-size: .62rem; }.dashboard-update i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; margin-bottom: 17px; }
+.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 11px; margin-bottom: 17px; }
 .metric-grid article { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 6px 18px rgba(37,57,88,.04); }
 .metric-grid span, .metric-grid small { display: block; color: var(--muted); font-size: .61rem; }.metric-grid strong { display: block; margin: 7px 0 4px; color: #26344b; font-size: 1.55rem; }.metric-grid .metric-allow { color: var(--green); }.metric-grid .metric-block { color: var(--red); }.metric-grid .metric-error { color: var(--amber); }
 .dashboard-filters { margin-bottom: 17px; overflow: hidden; }
@@ -388,7 +389,7 @@ main { background: transparent; }
   color: #9f3d3d;
   background: var(--red-soft);
 }
-.status-error, .status-high, .status-alert {
+.status-error, .status-high, .status-alert, .status-outcome_unknown {
   border-color: rgba(161, 92, 11, .14);
   color: #8b510e;
   background: var(--amber-soft);

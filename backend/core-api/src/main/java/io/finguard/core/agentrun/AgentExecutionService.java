@@ -41,16 +41,22 @@ public class AgentExecutionService {
                     "Credential에 묶인 Employee의 실행만 조회할 수 있습니다.");
         }
 
+        List<AuditEvent> events = auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc(agentRunId);
+        // 결과를 아는 시도만 싣는다. PROCESSING·OUTCOME_UNKNOWN에는 판정도 시스템 결과도 없다.
         List<AgentExecutionResponse.Attempt> attempts =
-                auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc(agentRunId).stream()
-                        .filter(event -> event.getStatus() != AuditStatus.PROCESSING)
+                events.stream()
+                        .filter(event -> event.getStatus().isOutcomeInput())
                         .map(AgentExecutionService::toAttempt)
                         .toList();
-        List<String> reasonCodes =
+        TreeSet<String> reasonCodeSet =
                 attempts.stream()
                         .flatMap(attempt -> attempt.reasonCodes().stream())
-                        .collect(java.util.stream.Collectors.collectingAndThen(
-                                java.util.stream.Collectors.toCollection(TreeSet::new), List::copyOf));
+                        .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
+        // 결과가 도착하지 않은 시도를 빼기만 하면 "완료, 시도 0건"으로 보인다. 사유로 드러낸다 — docs/04 §3.
+        if (events.stream().anyMatch(event -> event.getStatus() == AuditStatus.OUTCOME_UNKNOWN)) {
+            reasonCodeSet.add(ReasonCode.AUDIT_OUTCOME_UNKNOWN.name());
+        }
+        List<String> reasonCodes = List.copyOf(reasonCodeSet);
 
         return new AgentExecutionResponse(
                 run.getAgentRunId(), publicStatus(run.getStatus()), reasonCodes, attempts);
