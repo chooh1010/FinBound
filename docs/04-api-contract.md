@@ -853,6 +853,26 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 
 `errorLocation`은 `^[A-Z][A-Z0-9_]*$` 형식이다.
 
+정책 판정에 닿은 결과는 선택 필드 `policyInput`으로 **OPA에 실제로 보낸 입력 중 Core 감사 행에 없던 값**을
+함께 보낼 수 있다(`contracts/audit/execution-outcome.schema.json`).
+
+```json
+"policyInput": {
+  "behaviorRiskLevel": "ALERT",
+  "behaviorAnomalyDetected": false,
+  "hardRequestLimitExceeded": false
+}
+```
+
+- ScopeStatus·Prompt Risk는 Core가 Context Resolve 때 이미 기록하므로 다시 보내지 않는다. 이 셋까지 있어야 감사 기록만으로
+  그 판정을 다시 계산할 수 있다(정책 변경 재평가).
+- 셋은 함께 보낸다. 판정에 닿지 못한 fail-closed(`decision` 없음)에는 보내지 않는다 — 보내면 `400`.
+- 보내지 않는 Gateway의 요청도 그대로 받는다(선택 필드, `null`은 생략과 같다). 그런 행은 재평가에서 "입력 없음"으로 분류된다.
+- §11 적용표의 "같은 결과" 비교에 포함된다. 단 비대칭이다: 판정 입력 없이 확정된 행에 같은 결과가 판정 입력과 함께 다시
+  오면 같은 결과(200, 저장값 그대로)로 본다 — 새 필드가 생겼다는 이유로 재전송이 충돌이 되지 않게. 반대로 판정 입력이
+  저장된 행에 다른 값이나 판정 입력 없는 결과가 오면 `409`다 — 저장된 근거를 조용히 지우거나 바꾸지 않는다.
+- `behaviorAnomalyDetected`는 현재 정책이 읽지 않는다. 기록만 한다.
+
 `systemOutcome`은 `COMPLETED | ERROR`만 받는다. `PROCESSING`과 `OUTCOME_UNKNOWN`은 `400`으로
 거부한다 — `OUTCOME_UNKNOWN`은 Core만 기록하는 상태다(docs/06 §10).
 

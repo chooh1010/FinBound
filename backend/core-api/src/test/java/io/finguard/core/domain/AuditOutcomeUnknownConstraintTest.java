@@ -114,6 +114,42 @@ class AuditOutcomeUnknownConstraintTest {
                 () -> insertCompletedAllow("AUD-U8", DETECTED_AT, null));
     }
 
+    /**
+     * V8이 UNKNOWN의 결과 필드 금지를 새 컬럼까지 넓혔는지는 데이터로 따로 위반시킬 수 없다(셋은 함께여야 하고
+     * behavior_risk_level은 V6이 이미 금지). 그래서 제약 정의에 새 컬럼이 들어 있는지를 직접 본다.
+     */
+    @Test
+    void theUnknownConstraintCoversTheNewPolicyInputColumns() {
+        String definition =
+                jdbc.queryForObject(
+                        "select pg_get_constraintdef(oid) from pg_constraint"
+                                + " where conname = 'chk_audit_outcome_unknown_has_no_outcome'",
+                        String.class);
+
+        assertThat(definition)
+                .contains("behavior_anomaly_detected IS NULL")
+                .contains("hard_request_limit_exceeded IS NULL")
+                .contains("behavior_risk_level IS NULL");
+    }
+
+    @Test
+    void rejectsAPartialPolicyInput() {
+        insertCompletedAllow("AUD-U10", null, null);
+        assertRejectedBy(
+                "chk_audit_policy_input_all_or_none",
+                () -> jdbc.update("update audit_events set behavior_risk_level = 'LOW' where audit_event_id = 'AUD-U10'"));
+    }
+
+    @Test
+    void rejectsAPolicyInputWithoutADecision() {
+        insert("AUD-U11", "ERROR", null, null, null);
+        assertRejectedBy(
+                "chk_audit_policy_input_requires_decision",
+                () -> jdbc.update(
+                        "update audit_events set behavior_risk_level = 'LOW', behavior_anomaly_detected = false,"
+                                + " hard_request_limit_exceeded = false where audit_event_id = 'AUD-U11'"));
+    }
+
     @Test
     void keepsTheDetectionTimeOnAResolvedRow() {
         insertCompletedAllow("AUD-U7", DETECTED_AT, RESOLVED_AT);

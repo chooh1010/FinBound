@@ -73,6 +73,16 @@ class AuditRuntimeContractTest {
                 "execution-outcome.fail-closed.valid.json"
             ),
             Arguments.of(
+                "판정 입력 null은 생략과 같다(fail-closed에서도 허용)",
+                "execution-outcome.schema.json",
+                "execution-outcome.fail-closed-null-policy-input.valid.json"
+            ),
+            Arguments.of(
+                "정책 판정에 닿은 결과는 판정 입력 스냅샷을 함께 기록",
+                "execution-outcome.schema.json",
+                "execution-outcome.allow-with-policy-input.valid.json"
+            ),
+            Arguments.of(
                 "인증 성공 직후 PROCESSING Business Audit 생성",
                 "audit-event.schema.json",
                 "audit-event.processing.valid.json"
@@ -186,6 +196,16 @@ class AuditRuntimeContractTest {
                 "PROCESSING의 탐지 시각 차단",
                 "audit-event.schema.json",
                 "audit-event.processing-with-detection.invalid.json"
+            ),
+            Arguments.of(
+                "fail-closed 결과의 판정 입력 차단",
+                "execution-outcome.schema.json",
+                "execution-outcome.fail-closed-with-policy-input.invalid.json"
+            ),
+            Arguments.of(
+                "판정 입력 스냅샷의 일부 누락 차단",
+                "execution-outcome.schema.json",
+                "execution-outcome.policy-input-partial.invalid.json"
             ),
             Arguments.of(
                 "Gateway 결과 입력의 OUTCOME_UNKNOWN 차단",

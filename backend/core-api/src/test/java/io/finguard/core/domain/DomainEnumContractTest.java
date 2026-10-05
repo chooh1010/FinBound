@@ -61,6 +61,12 @@ class DomainEnumContractTest {
     }
 
     @Test
+    void behaviorRiskLevelMatchesConvention() {
+        // docs/06 §15. OPA 입력 risk.behaviorRiskLevel과 같은 값이라 판정 재현에 쓰인다.
+        assertThat(BehaviorRiskLevel.values()).extracting(Enum::name).containsExactly("LOW", "ALERT", "CRITICAL");
+    }
+
+    @Test
     void policyDecisionHasNoErrorValue() {
         // docs/06 §11 — 시스템 장애는 Decision Enum이 아니라 Audit 상태로 표현한다.
         assertThat(PolicyDecision.values()).extracting(Enum::name).containsExactly("ALLOW", "BLOCK");
