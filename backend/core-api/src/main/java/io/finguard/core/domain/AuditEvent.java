@@ -161,6 +161,13 @@ public class AuditEvent {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * DB가 선저장 행을 받은 시각. DB 기본값(now())으로만 채운다 — 애플리케이션은 쓰지 않는다.
+     * V7 이전 행은 null이다(실제 수신 시각을 알 수 없다).
+     */
+    @Column(name = "received_at", insertable = false, updatable = false)
+    private Instant receivedAt;
+
     /** Core가 결과 미도착을 처음 기록한 시각. 한 번 남으면 바뀌지 않는다 — docs/06 §10. */
     @Column(name = "outcome_unknown_detected_at")
     private Instant outcomeUnknownDetectedAt;
@@ -381,12 +388,32 @@ public class AuditEvent {
         return completedAt;
     }
 
+    public Instant getReceivedAt() {
+        return receivedAt;
+    }
+
     public Instant getOutcomeUnknownDetectedAt() {
         return outcomeUnknownDetectedAt;
     }
 
     public Instant getOutcomeResolvedAt() {
         return outcomeResolvedAt;
+    }
+
+    /**
+     * 결과 기록이 끝내 오지 않은 PROCESSING 행을 OUTCOME_UNKNOWN으로 바꾼다. Core 조정 배치만 부른다.
+     *
+     * <p>상태와 탐지 시각만 바꾼다. 판정·도달 여부·완료 시각·사유 같은 결과 필드는 모르는 값이라
+     * 건드리지 않는다 — 채우면 지어낸 증거가 된다(docs/06 §10). 엔티티로 바꾸는 이유는 {@code @Version}
+     * 때문이다. 벌크 UPDATE는 버전을 올리지 않아, 동시에 결과를 반영하던 트랜잭션이 옛 엔티티로
+     * PROCESSING을 되살릴 수 있다.
+     */
+    public void markOutcomeUnknown(Instant detectedAt) {
+        if (status != AuditStatus.PROCESSING) {
+            throw new IllegalStateException("Only a processing audit can be declared outcome unknown");
+        }
+        this.status = AuditStatus.OUTCOME_UNKNOWN;
+        this.outcomeUnknownDetectedAt = detectedAt;
     }
 
     /** PROCESSING 기록에 최종 결과를 한 번만 적용한다. 감사 증거의 사후 덮어쓰기를 허용하지 않는다. */

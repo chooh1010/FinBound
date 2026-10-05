@@ -36,6 +36,15 @@ finguard:
     connect-timeout-ms: ${AI_RISK_CONNECT_TIMEOUT_MS:1000}
     # ONNX 추론 한 번이다. Agent 왕복(10초)보다 짧아도 된다.
     read-timeout-ms: ${AI_RISK_READ_TIMEOUT_MS:3000}
+  audit:
+    reconciliation:
+      # 결과 기록이 오지 않은 PROCESSING 행을 OUTCOME_UNKNOWN으로 드러낸다 — docs/06 §10.
+      # 끄면 유실이 다시 조용해진다. 테스트처럼 직접 호출할 때만 끈다.
+      enabled: ${AUDIT_RECONCILIATION_ENABLED:true}
+      # DB 수신 시각 기준. 잠정값 — 성공 경로 지연을 측정해 근거를 남기고 조정한다.
+      threshold: ${AUDIT_RECONCILIATION_THRESHOLD:60s}
+      interval: ${AUDIT_RECONCILIATION_INTERVAL:5s}
+      batch-size: ${AUDIT_RECONCILIATION_BATCH_SIZE:100}
 
 management:
   endpoints:
