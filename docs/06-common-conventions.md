@@ -518,7 +518,8 @@ Prompt Risk는 Runtime마다 새로 계산되는 행동 점수가 아니라 **�
 - PostgreSQL 직접 연결을 금지한다.
 - 전체 활동은 `ALLOW / BLOCK / ERROR`를 모두 포함한다.
 - `OUTCOME_UNKNOWN`은 판정이 없으므로 `ALLOW / BLOCK / ERROR` 어디에도 넣지 않고 별도 수
-  (`outcomeUnknown`)로 집계하며, 목록에는 "결과 미확인"과 탐지 시각으로 표시한다. 숨기지 않는다.
+  (`outcomeUnknown`)로 집계한다. 목록에는 "결과 미확인" 배지로, 상세에는 탐지 시각(해소됐다면
+  해소 시각도)으로 표시한다. 숨기지 않는다.
 - 기본 정렬은 `requestedAt DESC`다.
 - 목록/상세 조회는 페이지네이션을 사용한다.
 - 위험 이벤트는 `riskFlagged=true` 또는 `HIGH/CRITICAL`로 필터링할 수 있다.

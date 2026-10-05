@@ -83,6 +83,7 @@ const booleanStatusLabel = (value, trueLabel, falseLabel) => {
 const executionStateLabel = computed(() => {
   if (execution.value?.status === 'RUNNING') return '업무 실행 중'
   if (execution.value?.status === 'ERROR' || errorAttempts.value.length) return '업무 오류'
+  if (execution.value?.outcomeUnknown) return '결과 미확인'
   return blockedAttempts.value.length ? `업무 완료 · 보호 ${blockedAttempts.value.length}건` : '업무 완료'
 })
 const isReviewReady = computed(() => Boolean(
@@ -90,6 +91,7 @@ const isReviewReady = computed(() => Boolean(
   && !executionError.value
   && execution.value.status === 'COMPLETED'
   && errorAttempts.value.length === 0
+  && !execution.value.outcomeUnknown
   && !loading.value,
 ))
 

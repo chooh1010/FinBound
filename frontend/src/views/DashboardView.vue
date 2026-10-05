@@ -37,6 +37,7 @@ const decisionLabels = {
   BLOCK: '차단',
   ERROR: '오류',
   PROCESSING: '처리 중',
+  OUTCOME_UNKNOWN: '결과 미확인',
   UNKNOWN: '확인 불가',
 }
 const severityLabels = { LOW: '일반', MEDIUM: '관찰', HIGH: '주의', CRITICAL: '긴급' }
@@ -80,6 +81,7 @@ const errorLocationLabels = {
 const eventOutcome = (event) => {
   if (event.auditStatus === 'ERROR') return 'ERROR'
   if (event.auditStatus === 'PROCESSING') return 'PROCESSING'
+  if (event.auditStatus === 'OUTCOME_UNKNOWN') return 'OUTCOME_UNKNOWN'
   return event.decision ?? 'UNKNOWN'
 }
 const summaryMetric = (key) => summary.value?.[key] ?? '—'
@@ -237,6 +239,7 @@ watch(page, () => {
         <article class="metric-success"><span class="metric-icon" aria-hidden="true"><svg class="soft-shield-icon" viewBox="0 0 24 24"><path class="shield-fill" d="M12 2.7c2.35 1.45 4.75 2.35 7.2 2.9v5.15c0 4.75-2.8 8.4-7.2 10.55-4.4-2.15-7.2-5.8-7.2-10.55V5.6c2.45-.55 4.85-1.45 7.2-2.9Z" /><path class="shield-symbol" d="m8.5 12 2.25 2.25 4.8-5" /></svg></span><div><span>정상 처리</span><strong class="metric-allow">{{ summaryMetric('allow') }}</strong><small>업무 범위 안에서 완료</small></div></article>
         <article class="metric-protected"><span class="metric-icon" aria-hidden="true"><svg class="soft-shield-icon" viewBox="0 0 24 24"><path class="shield-fill" d="M12 2.7c2.35 1.45 4.75 2.35 7.2 2.9v5.15c0 4.75-2.8 8.4-7.2 10.55-4.4-2.15-7.2-5.8-7.2-10.55V5.6c2.45-.55 4.85-1.45 7.2-2.9Z" /><path class="shield-symbol" d="M9 9l6 6M15 9l-6 6" /></svg></span><div><span>안전 차단</span><strong class="metric-block">{{ summaryMetric('block') }}</strong><small>금융시스템 조회 전 중단</small></div></article>
         <article class="metric-warning"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 21 20H3L12 3Z" /><path d="M12 9v5M12 17h.01" /></svg></span><div><span>처리 오류</span><strong class="metric-error">{{ summaryMetric('error') }}</strong><small>확인 또는 재처리 필요</small></div></article>
+        <article class="metric-warning metric-outcome-unknown"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4M12 17h.01" /></svg></span><div><span>결과 미확인</span><strong class="metric-error">{{ summaryMetric('outcomeUnknown') }}</strong><small>결과 기록 누락 확인 필요</small></div></article>
       </div>
 
       <div v-if="summaryError" class="dashboard-error" role="alert">
@@ -337,6 +340,8 @@ watch(page, () => {
           <div><dt>결과 제공</dt><dd>{{ responseStatusLabel(selectedEvent) }}</dd></div>
           <div class="full"><dt>확인 요청 자료</dt><dd>{{ requestedDataLabel(selectedEvent) }}</dd></div>
           <div v-if="selectedEvent.auditStatus === 'ERROR'" class="full error-location"><dt>오류 발생 위치</dt><dd>{{ errorLocationLabel(selectedEvent) }}</dd></div>
+          <div v-if="selectedEvent.outcomeUnknownDetectedAt" class="full error-location"><dt>결과 미확인 탐지</dt><dd>{{ selectedEvent.outcomeUnknownDetectedAt }}</dd></div>
+          <div v-if="selectedEvent.outcomeResolvedAt" class="full"><dt>늦게 도착한 결과로 확정</dt><dd>{{ selectedEvent.outcomeResolvedAt }}</dd></div>
         </dl>
         <details class="evidence-details">
           <summary>판단 근거와 버전 정보</summary>

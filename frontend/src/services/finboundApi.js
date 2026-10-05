@@ -149,7 +149,8 @@ export function mapAuditEvent(raw) {
   return {
     ...raw,
     auditStatus: raw.status,
-    systemOutcome: raw.systemOutcome ?? (raw.status === 'PROCESSING' ? null : raw.status),
+    // systemOutcome은 COMPLETED|ERROR뿐이다. PROCESSING·OUTCOME_UNKNOWN에는 시스템 결과가 없다.
+    systemOutcome: raw.systemOutcome ?? (['COMPLETED', 'ERROR'].includes(raw.status) ? raw.status : null),
     promptEvaluationStatus: raw.promptRiskEvaluationStatus ?? 'NOT_EVALUATED',
     promptRiskLevel: raw.promptRiskLevel ?? null,
     featureVersion: raw.behaviorFeatureVersion ?? null,
@@ -209,6 +210,23 @@ function mapExecutionAttempt(raw = {}) {
   return { ...attempt, description: executionDescription(attempt) }
 }
 
+const OUTCOME_UNKNOWN_REASON = 'AUDIT_OUTCOME_UNKNOWN'
+
+function hasOutcomeUnknown(execution) {
+  return Array.isArray(execution?.reasonCodes) && execution.reasonCodes.includes(OUTCOME_UNKNOWN_REASON)
+}
+
+/**
+ * 시도 0건을 받아 주는 예외는 계약 그대로의 모양일 때만 연다. attempts가 빠졌거나
+ * 사유 목록에 문자열이 아닌 값이 섞인 응답까지 통과시키면 검증기가 느슨해진다.
+ */
+function isOutcomeUnknownWithoutAttempts(execution) {
+  return hasOutcomeUnknown(execution)
+    && Array.isArray(execution.attempts)
+    && execution.attempts.length === 0
+    && execution.reasonCodes.every((code) => typeof code === 'string' && code.length > 0)
+}
+
 function validateExecution(execution, agentRunId) {
   if (!execution || execution.agentRunId !== agentRunId || !EXECUTION_STATUSES.has(execution.status)) {
     throw new FinboundApiError('Core API returned an invalid Agent execution response', {
@@ -220,7 +238,10 @@ function validateExecution(execution, agentRunId) {
       code: 'CORE_API_INVALID_RESPONSE',
     })
   }
-  if (execution.status === 'COMPLETED' && (!execution.attempts || execution.attempts.length === 0)) {
+  // 결과 기록이 도착하지 않은 시도는 attempts에 없고 실행 사유로만 온다(docs/04 §3). 그때의 0건은 정상 계약이다.
+  if (execution.status === 'COMPLETED'
+      && (!execution.attempts || execution.attempts.length === 0)
+      && !isOutcomeUnknownWithoutAttempts(execution)) {
     throw new FinboundApiError('Completed Agent execution did not include an execution attempt', {
       code: 'CORE_API_INVALID_RESPONSE',
     })
@@ -290,15 +311,42 @@ function mapAgentExecution(agentRun, permission, execution) {
     status === 'ERROR' ? 1 : 0,
   )
   const executionReasonCodes = Array.isArray(execution.reasonCodes) ? execution.reasonCodes : []
+  const outcomeUnknown = hasOutcomeUnknown(execution)
 
   if (status === 'RUNNING') {
     return {
       status,
+      // Core는 실행 상태와 무관하게 결과 미확인을 표시한다. 실행 중이어도 경고를 잃지 않는다.
+      outcomeUnknown,
       title: 'AI 업무를 실행하고 있습니다',
       message: 'Core가 Agent를 호출했으며 실행 결과를 기다리고 있습니다.',
       resultHeading: '현재 업무 권한이 준비되었습니다',
-      resultItems: mapPermissionSummary(permission),
+      resultItems: [
+        ...mapPermissionSummary(permission),
+        ...(outcomeUnknown ? ['결과 미확인 시도 있음'] : []),
+      ],
       nextAction: '잠시 후 업무 기록에서 최신 실행 상태를 확인해 주세요.',
+      attempts,
+      agentRun,
+      permission,
+    }
+  }
+
+  if (outcomeUnknown && status !== 'ERROR') {
+    return {
+      status,
+      outcomeUnknown,
+      title: 'AI 업무 결과 기록을 확인할 수 없습니다',
+      message: '일부 시도의 처리 결과가 감사 기록에 남지 않았습니다. 정상 완료로 처리하지 않았습니다.',
+      resultHeading: 'Agent 실행 결과',
+      resultItems: [
+        `정상 확인 ${allowedCount}건`,
+        `안전 차단 ${blockedCount}건`,
+        `처리 오류 ${errorCount}건`,
+        '결과 미확인 시도 있음',
+        `실행 사유 ${executionReasonCodes.join(' · ')}`,
+      ],
+      nextAction: '업무 기록에서 결과 미확인 건을 확인한 뒤 진행해 주세요.',
       attempts,
       agentRun,
       permission,
@@ -307,6 +355,7 @@ function mapAgentExecution(agentRun, permission, execution) {
 
   return {
     status,
+    outcomeUnknown,
     title: status === 'ERROR' || errorCount ? 'AI 업무 처리 중 오류가 발생했습니다' : 'AI 업무 처리가 완료되었습니다',
     message: status === 'ERROR' || errorCount
       ? '정상 완료로 처리하지 않았습니다. 아래 실행 사유와 업무 기록을 확인해 주세요.'
@@ -364,6 +413,7 @@ const mockApi = {
       allow: events.filter((event) => eventOutcome(event) === 'ALLOW').length,
       block: events.filter((event) => eventOutcome(event) === 'BLOCK').length,
       error: events.filter((event) => eventOutcome(event) === 'ERROR').length,
+      outcomeUnknown: events.filter((event) => event.auditStatus === 'OUTCOME_UNKNOWN').length,
     }
   },
 }

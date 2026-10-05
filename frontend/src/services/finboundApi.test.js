@@ -343,6 +343,49 @@ describe('real Core API adapter', () => {
     })
   })
 
+  it('shows a completed run without attempts as outcome unknown when Core says so', async () => {
+    // 결과 기록이 도착하지 않은 시도는 attempts에 없고 실행 사유로만 온다(docs/04 §3).
+    // 이때 0건을 "응답 형식 오류"로 버리면 원인이 화면에서 사라진다.
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-UNKNOWN', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-UNKNOWN',
+        status: 'COMPLETED',
+        reasonCodes: ['AUDIT_OUTCOME_UNKNOWN'],
+        attempts: [],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.outcomeUnknown).toBe(true)
+    expect(result.title).toBe('AI 업무 결과 기록을 확인할 수 없습니다')
+    expect(result.title).not.toBe('AI 업무 처리가 완료되었습니다')
+    expect(result.resultItems).toContain('결과 미확인 시도 있음')
+  })
+
+  it.each([
+    ['attempts are missing', { reasonCodes: ['AUDIT_OUTCOME_UNKNOWN'] }],
+    ['a reason code is not a string', { reasonCodes: ['AUDIT_OUTCOME_UNKNOWN', null], attempts: [] }],
+  ])('still rejects a completed run without attempts when %s', async (_label, shape) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-MALFORMED', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-MALFORMED', status: 'COMPLETED', ...shape }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
   it('keeps a fail-closed attempt that carries no policy decision', async () => {
     // 정책 판정에 닿기 전 시스템 장애로 차단된 실행은 decision 을 생략한다.
     // contracts/audit/fixtures/execution-outcome.fail-closed.valid.json 이 그 모양이고,
@@ -464,6 +507,18 @@ describe('real Core API adapter', () => {
     expect(mapped.riskFlagged).toBeNull()
     expect(mapped.promptInjectionDetected).toBeNull()
     expect(mapped.systemOutcome).toBeNull()
+  })
+
+  it('never derives a system outcome for an outcome-unknown audit', () => {
+    const mapped = mapAuditEvent({
+      auditEventId: 'AUD-2',
+      status: 'OUTCOME_UNKNOWN',
+      outcomeUnknownDetectedAt: '2026-10-05T12:01:05Z',
+    })
+
+    expect(mapped.auditStatus).toBe('OUTCOME_UNKNOWN')
+    expect(mapped.systemOutcome).toBeNull()
+    expect(mapped.outcomeUnknownDetectedAt).toBe('2026-10-05T12:01:05Z')
   })
 
   it('uses a dedicated typed error for adapter failures', () => {
