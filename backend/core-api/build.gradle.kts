@@ -11,6 +11,8 @@ dependencies {
     // 스키마의 주인은 db/migration이다. ddl-auto는 validate로 두고 Hibernate가 스키마를 만들지 않는다.
     // docs/adr/0002-flyway-owns-core-api-schema.md
     implementation("org.flywaydb:flyway-core")
+    // 도구 호출 이벤트 스트림: 아웃박스 릴레이(발행)와 경보·재평가 소비자.
+    implementation("org.springframework.kafka:spring-kafka")
     // Flyway 10부터 DB별 지원이 별도 모듈로 분리됐다.
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
@@ -21,6 +23,8 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
+    // 릴레이·소비자 테스트는 실제 브로커에서 돌린다.
+    testImplementation("org.testcontainers:kafka")
     // 아웃박스가 만든 이벤트 페이로드를 contracts/events 스키마로 직접 검증한다(backend/audit와 같은 버전).
     // YAML 스키마는 쓰지 않는다. core-api의 버전 관리가 yaml 모듈을 검증 목록(verification-metadata)에 없는
     // 버전으로 끌어오므로 뺀다 — 검증 목록을 넓히지 않는다.
