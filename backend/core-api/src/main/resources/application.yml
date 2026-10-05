@@ -68,6 +68,16 @@ finguard:
       batch-size: ${EVENT_RELAY_BATCH_SIZE:100}
       # ack 대기 상한. 이 안에 ack가 없으면 그 행은 미발행으로 남고 다음 주기에 다시 보낸다.
       send-timeout: ${EVENT_RELAY_SEND_TIMEOUT:10s}
+    alerts:
+      # 이상 징후 경보 소비자. Kafka가 없는 기본 스택에서는 끈다(K 덧씌우기에서 켠다).
+      enabled: ${EVENT_ALERTS_ENABLED:false}
+      group-id: finguard-anomaly-alert
+      dlt-topic: ${EVENT_ALERTS_DLT_TOPIC:finguard.tool-call.events.v1.dlt}
+      # 고정 UTC 버킷. 같은 에이전트·버킷에서 BLOCK 5회 이상, riskFlagged 결과 3회 이상이면 경보.
+      # OUTCOME_UNKNOWN은 즉시(에이전트·버킷당 1건).
+      window: 60s
+      block-threshold: 5
+      risk-flag-threshold: 3
 
 management:
   endpoints:
