@@ -108,6 +108,20 @@ public class AuditEvent {
     @Column(name = "behavior_risk", precision = 5, scale = 4)
     private BigDecimal behaviorRisk;
 
+    /**
+     * OPA 판정 입력 중 Gateway만 아는 셋. 정책 판정에 닿은 결과에서만 채운다 — {@link PolicyInput}.
+     * 셋은 함께 있거나 함께 없다(V8 제약). 판정 입력을 보내지 않던 Gateway가 확정한 행은 모두 null이다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "behavior_risk_level", length = 16)
+    private BehaviorRiskLevel behaviorRiskLevel;
+
+    @Column(name = "behavior_anomaly_detected")
+    private Boolean behaviorAnomalyDetected;
+
+    @Column(name = "hard_request_limit_exceeded")
+    private Boolean hardRequestLimitExceeded;
+
     /** OPA가 반환한 정책 중요도. 과거 기록과 정책 판정 전 시스템 오류에는 없을 수 있다. */
     @Enumerated(EnumType.STRING)
     @Column(name = "severity", length = 16)
@@ -336,6 +350,13 @@ public class AuditEvent {
         return promptRisk;
     }
 
+    /** 판정 입력 스냅샷. 판정에 닿지 않았거나 Gateway가 보내지 않은 행이면 null이다. */
+    public PolicyInput getPolicyInput() {
+        return behaviorRiskLevel == null
+                ? null
+                : new PolicyInput(behaviorRiskLevel, behaviorAnomalyDetected, hardRequestLimitExceeded);
+    }
+
     public BigDecimal getBehaviorRisk() {
         return behaviorRisk;
     }
@@ -464,6 +485,7 @@ public class AuditEvent {
                 && Objects.equals(completion.latencyMs(), latencyMs)
                 && Objects.equals(completion.errorLocation(), errorLocation)
                 && sameRisk(completion.behaviorRisk(), behaviorRisk)
+                && samePolicyInput(completion.policyInput())
                 && completion.severity() == severity
                 && Objects.equals(completion.riskFlagged(), riskFlagged)
                 && Objects.equals(completion.policyVersion(), policyVersion)
@@ -484,11 +506,24 @@ public class AuditEvent {
         this.latencyMs = completion.latencyMs();
         this.errorLocation = completion.errorLocation();
         this.behaviorRisk = completion.behaviorRisk();
+        PolicyInput policyInput = completion.policyInput();
+        this.behaviorRiskLevel = policyInput == null ? null : policyInput.behaviorRiskLevel();
+        this.behaviorAnomalyDetected = policyInput == null ? null : policyInput.behaviorAnomalyDetected();
+        this.hardRequestLimitExceeded = policyInput == null ? null : policyInput.hardRequestLimitExceeded();
         this.severity = completion.severity();
         this.riskFlagged = completion.riskFlagged();
         this.policyVersion = completion.policyVersion();
         this.status = completion.systemOutcome();
         this.completedAt = completion.completedAt();
+    }
+
+    /**
+     * 판정 입력 비교. 판정 입력을 보내지 않던 Gateway가 확정한 행(셋 다 null)에 같은 결과가 스냅샷과 함께
+     * 다시 오면 같은 결과로 본다 — 새 필드가 생겼다는 이유만으로 기존 행의 재전송이 충돌이 되면 안 된다.
+     */
+    private boolean samePolicyInput(PolicyInput incoming) {
+        PolicyInput stored = getPolicyInput();
+        return stored == null || Objects.equals(stored, incoming);
     }
 
     private static boolean sameRisk(BigDecimal incoming, BigDecimal stored) {

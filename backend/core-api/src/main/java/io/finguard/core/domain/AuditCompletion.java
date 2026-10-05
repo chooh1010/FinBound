@@ -19,7 +19,28 @@ public record AuditCompletion(
         Severity severity,
         Boolean riskFlagged,
         String policyVersion,
-        Instant completedAt) {
+        Instant completedAt,
+        PolicyInput policyInput) {
+
+    /** 판정 입력 스냅샷이 없는 결과(fail-closed, 판정 입력을 보내지 않던 Gateway). */
+    public AuditCompletion(
+            PolicyDecision decision,
+            AuditStatus systemOutcome,
+            Set<String> reasonCodes,
+            boolean downstreamReached,
+            boolean responseReleased,
+            Boolean success,
+            Integer recordsRead,
+            Long latencyMs,
+            String errorLocation,
+            BigDecimal behaviorRisk,
+            Severity severity,
+            Boolean riskFlagged,
+            String policyVersion,
+            Instant completedAt) {
+        this(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success, recordsRead,
+                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt, null);
+    }
 
     public AuditCompletion {
         // OUTCOME_UNKNOWN은 결과가 아니라 결과 부재다. 결과 적용 경로로 들어오면 안 된다.
@@ -92,6 +113,10 @@ public record AuditCompletion(
         }
         if (completedAt == null) {
             throw new IllegalArgumentException("Audit completion requires completedAt");
+        }
+        // 판정에 닿지 못한 결과에 판정 입력이 있으면 지어낸 근거다.
+        if (decision == null && policyInput != null) {
+            throw new IllegalArgumentException("Outcomes without a policy decision cannot carry policy input");
         }
         reasonCodes = Set.copyOf(reasonCodes);
     }

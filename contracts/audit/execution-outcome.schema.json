@@ -37,13 +37,29 @@
     "errorLocation": { "$ref": "#/$defs/upperSnakeCase" },
     "severity": { "$ref": "#/$defs/severity" },
     "riskFlagged": { "type": "boolean" },
-    "completedAt": { "$ref": "#/$defs/timestamp" }
+    "completedAt": { "$ref": "#/$defs/timestamp" },
+    "policyInput": {
+      "$comment": "OPA inputs the Core audit row does not already hold. Only when a policy decision was reached (docs/04 §11). null means the same as absent.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["behaviorRiskLevel", "behaviorAnomalyDetected", "hardRequestLimitExceeded"],
+      "properties": {
+        "behaviorRiskLevel": { "type": "string", "enum": ["LOW", "ALERT", "CRITICAL"] },
+        "behaviorAnomalyDetected": { "type": "boolean" },
+        "hardRequestLimitExceeded": { "type": "boolean" }
+      }
+    }
   },
   "dependentRequired": {
     "severity": ["riskFlagged"],
     "riskFlagged": ["severity"]
   },
   "allOf": [
+    {
+      "$comment": "A fail-closed outcome never reached the policy; it has no policy input to report.",
+      "if": { "not": { "required": ["decision"] } },
+      "then": { "properties": { "policyInput": { "type": "null" } } }
+    },
     {
       "if": { "required": ["decision"] },
       "then": { "required": ["severity", "riskFlagged"] }
