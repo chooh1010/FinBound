@@ -1,0 +1,98 @@
+# K (tool-call event stream) overlay — personal extension, not for the team stack.
+#
+# Layer after the F1 overlays (ai-risk is needed for the ALLOW path):
+#   docker compose -p finguard-k --env-file <env outside the repo> \
+#     -f docker-compose.yml -f docker-compose.demo.yml -f docker-compose.expose.yml \
+#     -f f1/docker-compose.f1-repro.yml -f f1/docker-compose.f1-normal.yml \
+#     -f k/docker-compose.k.yml up -d --build --wait
+#   then once: ... -f k/docker-compose.k.yml --profile setup run --rm kafka-init
+# (run from infrastructure/; relative paths resolve against it)
+#
+# Kafka sits in data-zone (internal network). The gateway is not on it and cannot reach the
+# broker; within data-zone there is no ACL, so other data-zone services could (single-broker limit).
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Topics are created explicitly by kafka-init; a typo must not create a new topic.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - finguard-kafka:/var/lib/kafka/data
+    mem_limit: 1g
+    healthcheck:
+      # The tool can print a broker error and still exit 0, so require the broker's own line.
+      # Its JVM gets a small heap so the probe does not crowd the broker inside mem_limit.
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS='-Xms16m -Xmx128m' /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null | grep -q '(id: 1 rack'"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    networks: [data-zone]
+
+  # One-shot topic setup. Under the "setup" profile so `up --wait` does not treat its normal
+  # exit as a failure. Run once: docker compose ... --profile setup run --rm kafka-init
+  kafka-init:
+    image: apache/kafka:3.9.1
+    profiles: ["setup"]
+    # One partition: no consumer needs fan-out at this scale, and it removes cross-partition
+    # ordering bugs. Retention 7 days = the replay window (SPEC §3-6).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
+        --topic finguard.tool-call.events.v1 --partitions 1 --replication-factor 1
+        --config cleanup.policy=delete --config retention.ms=604800000 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
+        --topic finguard.tool-call.events.v1.dlt --partitions 1 --replication-factor 1
+        --config cleanup.policy=delete --config retention.ms=604800000 &&
+        for t in finguard.tool-call.events.v1 finguard.tool-call.events.v1.dlt; do
+        d=$$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic $$t) &&
+        echo "$$d" | grep -Eq 'PartitionCount: 1[[:space:]]' &&
+        echo "$$d" | grep -Eq 'ReplicationFactor: 1[[:space:]]' &&
+        echo "$$d" | grep -Eq 'cleanup.policy=delete(,|[[:space:]]|$$)' &&
+        echo "$$d" | grep -Eq 'retention.ms=604800000(,|[[:space:]]|$$)' || { echo "topic config drift: $$t"; exit 1; }; done
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    networks: [data-zone]
+
+  # Candidate policy for re-evaluation (replay). Separate from the live OPA the gateway uses;
+  # the bundle directory is read-only and its hash is recorded per re-evaluation run.
+  opa-candidate:
+    image: openpolicyagent/opa:1.17.0-static
+    restart: unless-stopped
+    command: [run, --server, --addr=0.0.0.0:8181, /policy]
+    volumes:
+      - ./k/policy-candidate:/policy:ro
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail", "http.send({\"method\":\"get\",\"url\":\"http://127.0.0.1:8181/health?bundles=true\"}).status_code == 200"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks: [data-zone]
+
+  core-api:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CANDIDATE_OPA_URL: http://opa-candidate:8181
+
+volumes:
+  finguard-kafka:
