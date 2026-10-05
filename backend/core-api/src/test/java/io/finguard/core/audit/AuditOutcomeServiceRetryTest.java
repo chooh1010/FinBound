@@ -24,6 +24,7 @@ import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.Severity;
 import io.finguard.core.domain.Tool;
+import io.finguard.core.event.ToolCallEventRecorder;
 import io.finguard.core.repository.AuditEventRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -42,6 +43,7 @@ class AuditOutcomeServiceRetryTest {
     private final AuditOutcomeService service =
             new AuditOutcomeService(
                     repository,
+                    mock(ToolCallEventRecorder.class),
                     mock(PlatformTransactionManager.class),
                     Clock.fixed(NOW, ZoneOffset.UTC),
                     new SimpleMeterRegistry());

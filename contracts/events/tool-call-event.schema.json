@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finguard.io/contracts/events/tool-call-event.schema.json",
+  "title": "ToolCallEvent",
+  "description": "Core가 감사 행을 바꿀 때 아웃박스로 발행하는 도구 호출 이벤트. 토픽 finguard.tool-call.events.v1, 키 agentId. 원본 Prompt, 금융 응답, 자격 증명, 고객 식별자를 싣지 않는다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "schemaVersion", "eventType", "occurredAt", "auditEventId", "requestId", "agentRunId", "agentId"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "schemaVersion": { "const": 1 },
+    "eventType": {
+      "type": "string",
+      "enum": ["TOOL_CALL_STARTED", "TOOL_CALL_FINALIZED", "TOOL_CALL_OUTCOME_UNKNOWN", "TOOL_CALL_OUTCOME_RESOLVED"]
+    },
+    "occurredAt": { "$ref": "#/$defs/timestamp" },
+    "auditEventId": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "requestId": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "agentRunId": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "agentId": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "tool": { "type": "string", "enum": ["CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ"] },
+    "requestedAt": { "$ref": "#/$defs/timestamp" },
+    "decision": { "type": "string", "enum": ["ALLOW", "BLOCK"] },
+    "systemOutcome": { "type": "string", "enum": ["COMPLETED", "ERROR"] },
+    "reasonCodes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+    },
+    "downstreamReached": { "type": "boolean" },
+    "responseReleased": { "type": "boolean" },
+    "severity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    "riskFlagged": { "type": "boolean" },
+    "policyVersion": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "completedAt": { "$ref": "#/$defs/timestamp" },
+    "detectedAt": { "$ref": "#/$defs/timestamp" },
+    "resolvedAt": { "$ref": "#/$defs/timestamp" },
+    "replayEligibility": { "type": "string", "enum": ["ELIGIBLE", "NO_POLICY_DECISION", "INPUT_MISSING"] },
+    "policyInput": { "$ref": "#/$defs/policyInput" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "TOOL_CALL_STARTED" } } },
+      "then": {
+        "$comment": "tool is optional: the start record accepts a request without a tool (AuditCreateRequest).",
+        "required": ["requestedAt"],
+        "not": { "anyOf": [
+          { "required": ["decision"] }, { "required": ["systemOutcome"] }, { "required": ["policyInput"] },
+          { "required": ["replayEligibility"] }, { "required": ["detectedAt"] }, { "required": ["completedAt"] }
+        ] }
+      }
+    },
+    {
+      "$comment": "The outcome never arrived: identifiers and the detection time only, nothing invented.",
+      "if": { "properties": { "eventType": { "const": "TOOL_CALL_OUTCOME_UNKNOWN" } } },
+      "then": {
+        "required": ["detectedAt"],
+        "not": { "anyOf": [
+          { "required": ["decision"] }, { "required": ["systemOutcome"] }, { "required": ["policyInput"] },
+          { "required": ["replayEligibility"] }, { "required": ["completedAt"] }, { "required": ["resolvedAt"] },
+          { "required": ["reasonCodes"] }, { "required": ["downstreamReached"] }, { "required": ["responseReleased"] },
+          { "required": ["severity"] }, { "required": ["riskFlagged"] }, { "required": ["policyVersion"] },
+          { "required": ["tool"] }, { "required": ["requestedAt"] }
+        ] }
+      }
+    },
+    {
+      "if": { "properties": { "eventType": { "enum": ["TOOL_CALL_FINALIZED", "TOOL_CALL_OUTCOME_RESOLVED"] } } },
+      "then": { "required": ["systemOutcome", "reasonCodes", "downstreamReached", "responseReleased", "completedAt", "replayEligibility"] }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "TOOL_CALL_OUTCOME_RESOLVED" } } },
+      "then": { "required": ["detectedAt", "resolvedAt"] }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "TOOL_CALL_FINALIZED" } } },
+      "then": { "not": { "anyOf": [{ "required": ["detectedAt"] }, { "required": ["resolvedAt"] }] } }
+    },
+    {
+      "$comment": "Replay needs the decision and the full policy input it was made on.",
+      "if": { "properties": { "replayEligibility": { "const": "ELIGIBLE" } }, "required": ["replayEligibility"] },
+      "then": { "required": ["decision", "policyInput"] }
+    },
+    {
+      "$comment": "Fail-closed never reached the policy: no decision and no policy input, never fabricated.",
+      "if": { "properties": { "replayEligibility": { "const": "NO_POLICY_DECISION" } }, "required": ["replayEligibility"] },
+      "then": { "not": { "anyOf": [{ "required": ["decision"] }, { "required": ["policyInput"] }] } }
+    },
+    {
+      "if": { "properties": { "replayEligibility": { "const": "INPUT_MISSING" } }, "required": ["replayEligibility"] },
+      "then": { "required": ["decision"], "not": { "required": ["policyInput"] } }
+    }
+  ],
+  "$defs": {
+    "nonEmptyIdentifier": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "scopeResult": { "type": "string", "enum": ["OK", "VIOLATION"] },
+    "riskLevel": { "type": "string", "enum": ["LOW", "ALERT", "CRITICAL"] },
+    "policyInput": {
+      "$comment": "Replay projection of the OPA input (policy/finguard_authz.rego). Built once when the outcome is recorded and never recomputed during replay.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "scopeStatus", "promptRiskLevel", "promptInjectionDetected", "behaviorRiskLevel", "behaviorAnomalyDetected", "hardRequestLimitExceeded"],
+      "properties": {
+        "version": { "const": 1 },
+        "scopeStatus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["employeeAuthority", "permissionTemplate", "caseStatus", "mandate", "passportStatus", "agentBinding", "customerScope", "toolScope", "dataScope"],
+          "properties": {
+            "employeeAuthority": { "$ref": "#/$defs/scopeResult" },
+            "permissionTemplate": { "$ref": "#/$defs/scopeResult" },
+            "caseStatus": { "$ref": "#/$defs/scopeResult" },
+            "mandate": { "$ref": "#/$defs/scopeResult" },
+            "passportStatus": { "$ref": "#/$defs/scopeResult" },
+            "agentBinding": { "$ref": "#/$defs/scopeResult" },
+            "customerScope": { "$ref": "#/$defs/scopeResult" },
+            "toolScope": { "$ref": "#/$defs/scopeResult" },
+            "dataScope": { "$ref": "#/$defs/scopeResult" }
+          }
+        },
+        "promptRiskLevel": { "$ref": "#/$defs/riskLevel" },
+        "promptInjectionDetected": { "type": "boolean" },
+        "behaviorRiskLevel": { "$ref": "#/$defs/riskLevel" },
+        "behaviorAnomalyDetected": { "type": "boolean" },
+        "hardRequestLimitExceeded": { "type": "boolean" }
+      }
+    }
+  }
+}

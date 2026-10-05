@@ -17,6 +17,7 @@ import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.SecurityAuthEvent;
 import io.finguard.core.domain.SecurityEventType;
 import io.finguard.core.repository.AuditEventRepository;
+import io.finguard.core.event.ToolCallEventRecorder;
 import io.finguard.core.repository.SecurityAuthEventRepository;
 import io.finguard.core.securityevent.AuthFailureEventRequest;
 import io.finguard.core.securityevent.SecurityEventService;
@@ -31,7 +32,7 @@ class PersistenceFailureTest {
         AuditEventRepository repository = mock(AuditEventRepository.class);
         when(repository.saveAndFlush(any(AuditEvent.class)))
                 .thenThrow(new DataAccessResourceFailureException("database unavailable"));
-        AuditService service = new AuditService(repository);
+        AuditService service = new AuditService(repository, mock(ToolCallEventRecorder.class));
         AuditCreateRequest request =
                 new AuditCreateRequest(
                         "REQ-FAIL",
@@ -54,7 +55,7 @@ class PersistenceFailureTest {
     void rejectsDuplicateBeforeAttemptingAnotherInsert() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
         when(repository.existsByRequestId("REQ-DUPLICATE")).thenReturn(true);
-        AuditService service = new AuditService(repository);
+        AuditService service = new AuditService(repository, mock(ToolCallEventRecorder.class));
         AuditCreateRequest request =
                 new AuditCreateRequest(
                         "REQ-DUPLICATE",

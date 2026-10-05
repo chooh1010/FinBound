@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import io.finguard.core.domain.AuditEvent;
+import io.finguard.core.event.ToolCallEventRecorder;
+import io.finguard.core.event.ToolCallEventType;
 import io.finguard.core.identifier.RecordIdentifiers;
 import io.finguard.core.repository.AuditEventRepository;
 
@@ -17,9 +19,11 @@ public class AuditService {
     private static final String REQUEST_ID_CONSTRAINT = "uk_audit_event_request_id";
 
     private final AuditEventRepository auditEvents;
+    private final ToolCallEventRecorder events;
 
-    public AuditService(AuditEventRepository auditEvents) {
+    public AuditService(AuditEventRepository auditEvents, ToolCallEventRecorder events) {
         this.auditEvents = auditEvents;
+        this.events = events;
     }
 
     @Transactional
@@ -40,7 +44,10 @@ public class AuditService {
                         request.requestedTool(),
                         request.requestedAt());
         try {
-            return AuditResponse.from(auditEvents.saveAndFlush(event));
+            AuditEvent saved = auditEvents.saveAndFlush(event);
+            // 선저장과 같은 트랜잭션. 이벤트 기록이 실패하면 선저장도 롤백되고 Gateway는 fail-closed한다.
+            events.record(saved, ToolCallEventType.TOOL_CALL_STARTED);
+            return AuditResponse.from(saved);
         } catch (DataIntegrityViolationException exception) {
             if (violatedRequestIdConstraint(exception)) {
                 throw AuditOperationException.duplicate();

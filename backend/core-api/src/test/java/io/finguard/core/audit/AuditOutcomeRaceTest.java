@@ -118,6 +118,7 @@ class AuditOutcomeRaceTest {
 
     @BeforeEach
     void resetAuditEvents() {
+        jdbc.update("delete from tool_call_event_outbox");
         rows = new AuditRows(jdbc);
         rows.reset();
     }
@@ -154,6 +155,13 @@ class AuditOutcomeRaceTest {
         assertThat(counter("audit.outcome.unknown.resolved") - resolvedBefore).isEqualTo(1.0);
         // 첫 읽기(PROCESSING) 뒤 충돌로 지고, 새 트랜잭션에서 다시 읽었다.
         assertThat(PausingRepositoryConfig.READS.get()).isGreaterThanOrEqualTo(2);
+        // 진 첫 시도는 감사 저장(낙관적 잠금)에서 실패해 FINALIZED를 쓰지 않았다. 남는 것은 배치의 UNKNOWN과
+        // 다시 읽은 해소뿐이다. (쓴 뒤 실패하는 롤백은 ToolCallEventOutboxTest의 POISON 테스트가 본다.)
+        assertThat(jdbc.queryForList(
+                        "select event_type from tool_call_event_outbox where audit_event_id = 'AUD-REQ-ORDERED'"
+                                + " order by id",
+                        String.class))
+                .containsExactly("TOOL_CALL_OUTCOME_UNKNOWN", "TOOL_CALL_OUTCOME_RESOLVED");
     }
 
     /** 결과 반영은 자기 트랜잭션으로 커밋한다. 호출한 쪽의 트랜잭션이 롤백돼도 기록은 남는다. */

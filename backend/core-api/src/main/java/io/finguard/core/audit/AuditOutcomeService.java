@@ -15,6 +15,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import io.finguard.core.domain.AuditCompletion;
 import io.finguard.core.domain.AuditEvent;
+import io.finguard.core.event.ToolCallEventRecorder;
+import io.finguard.core.event.ToolCallEventType;
 import io.finguard.core.repository.AuditEventRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -43,6 +45,7 @@ public class AuditOutcomeService {
     private static final int MAX_ATTEMPTS = 3;
 
     private final AuditEventRepository auditEvents;
+    private final ToolCallEventRecorder events;
     private final TransactionTemplate transaction;
     private final Clock clock;
     private final Counter resolvedCounter;
@@ -50,10 +53,12 @@ public class AuditOutcomeService {
 
     public AuditOutcomeService(
             AuditEventRepository auditEvents,
+            ToolCallEventRecorder events,
             PlatformTransactionManager transactionManager,
             Clock clock,
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
+        this.events = events;
         this.transaction = new TransactionTemplate(transactionManager);
         // 시도마다 독립된 새 트랜잭션이다. 바깥 트랜잭션에 합류하면 재시도가 이미 rollback-only가 된
         // 같은 트랜잭션을 다시 쓰고, 커밋 전에 "커밋 뒤" 지표·경보가 나간다.
@@ -98,11 +103,17 @@ public class AuditOutcomeService {
             switch (event.getStatus()) {
                 case PROCESSING -> {
                     event.complete(completion);
-                    return Applied.of(Kind.COMPLETED, auditEvents.saveAndFlush(event));
+                    AuditEvent completed = auditEvents.saveAndFlush(event);
+                    // 같은 트랜잭션 안. 낙관적 잠금으로 지면 이 기록도 함께 롤백된다.
+                    events.record(completed, ToolCallEventType.TOOL_CALL_FINALIZED);
+                    return Applied.of(Kind.COMPLETED, completed);
                 }
                 case OUTCOME_UNKNOWN -> {
                     event.resolveOutcome(completion, clock.instant());
-                    return Applied.of(Kind.RESOLVED, auditEvents.saveAndFlush(event));
+                    AuditEvent resolved = auditEvents.saveAndFlush(event);
+                    // 해소는 RESOLVED 하나만 낸다. FINALIZED를 같이 내면 같은 결과가 두 번 집계된다.
+                    events.record(resolved, ToolCallEventType.TOOL_CALL_OUTCOME_RESOLVED);
+                    return Applied.of(Kind.RESOLVED, resolved);
                 }
                 case COMPLETED, ERROR -> {
                     return Applied.of(event.hasSameOutcome(completion) ? Kind.REPEATED : Kind.CONFLICT, event);

@@ -21,4 +21,14 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
+    // 아웃박스가 만든 이벤트 페이로드를 contracts/events 스키마로 직접 검증한다(backend/audit와 같은 버전).
+    // YAML 스키마는 쓰지 않는다. core-api의 버전 관리가 yaml 모듈을 검증 목록(verification-metadata)에 없는
+    // 버전으로 끌어오므로 뺀다 — 검증 목록을 넓히지 않는다.
+    testImplementation("com.networknt:json-schema-validator:2.0.4") {
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
+}
+
+tasks.test {
+    systemProperty("finguard.repository.root", rootProject.projectDir.absolutePath)
 }
