@@ -71,6 +71,63 @@ class DashboardApiTest {
         assertThat(body.get("allow").asInt()).isEqualTo(1);
         assertThat(body.get("block").asInt()).isEqualTo(2);
         assertThat(body.get("error").asInt()).isEqualTo(1);
+        assertThat(body.get("outcomeUnknown").asInt()).isZero();
+    }
+
+    /** 결과가 도착하지 않은 기록이 total에만 묻히면 화면에서 유실이 보이지 않는다 — docs/06 §25. */
+    @Test
+    void summaryCountsOutcomeUnknownSeparatelyFromDecisions() {
+        insertAudit("AUD-001", "REQ-001", "ALLOW", "COMPLETED", "2026-08-25T10:00:00Z");
+        insertOutcomeUnknownAudit("AUD-002", "REQ-002", "2026-08-25T10:01:00Z", "2026-08-25T10:02:05Z");
+        insertProcessingAudit("AUD-003", "REQ-003", "2026-08-25T10:03:00Z");
+
+        JsonNode body = getAsViewer("/api/v1/dashboard/summary").getBody();
+
+        assertThat(body).isNotNull();
+        assertThat(body.get("total").asInt()).isEqualTo(3);
+        assertThat(body.get("allow").asInt()).isEqualTo(1);
+        assertThat(body.get("block").asInt()).isZero();
+        assertThat(body.get("error").asInt()).isZero();
+        assertThat(body.get("outcomeUnknown").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void outcomeUnknownEventExposesDetectionTimeWithoutInventedOutcome() {
+        insertOutcomeUnknownAudit("AUD-200", "REQ-200", "2026-08-25T10:00:00Z", "2026-08-25T10:01:05Z");
+
+        JsonNode body = getAsViewer("/api/v1/audit-events/AUD-200").getBody();
+
+        assertThat(body).isNotNull();
+        assertThat(body.get("status").asText()).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(Instant.parse(body.get("outcomeUnknownDetectedAt").asText()))
+                .isEqualTo(Instant.parse("2026-08-25T10:01:05Z"));
+        // audit-event.schema.json은 OUTCOME_UNKNOWN에서 결과 필드 키의 존재 자체를 금지한다.
+        for (String outcomeField : java.util.List.of(
+                "systemOutcome", "decision", "downstreamReached", "responseReleased",
+                "success", "completedAt", "outcomeResolvedAt")) {
+            assertThat(body.has(outcomeField)).as(outcomeField).isFalse();
+        }
+        assertThat(body.get("reasonCodes").isArray()).isTrue();
+        assertThat(body.get("reasonCodes")).isEmpty();
+    }
+
+    /** 판정이 없는 UNKNOWN 행이 정상·차단·오류 어느 필터에도 섞이면 안 된다. */
+    @Test
+    void outcomeFiltersDoNotPickUpOutcomeUnknownRows() {
+        insertAudit("AUD-001", "REQ-001", "ALLOW", "COMPLETED", "2026-08-25T10:00:00Z");
+        insertAudit("AUD-002", "REQ-002", "BLOCK", "COMPLETED", "2026-08-25T10:01:00Z");
+        insertAudit("AUD-003", "REQ-003", "ALLOW", "ERROR", "2026-08-25T10:02:00Z");
+        insertOutcomeUnknownAudit("AUD-004", "REQ-004", "2026-08-25T10:03:00Z", "2026-08-25T10:04:05Z");
+
+        for (String outcome : java.util.List.of("ALLOW", "BLOCK", "ERROR")) {
+            JsonNode body = getAsViewer("/api/v1/audit-events?outcome=" + outcome).getBody();
+            assertThat(body).isNotNull();
+            assertThat(body.get("totalItems").asInt()).as(outcome).isEqualTo(1);
+            assertThat(body.get("items").get(0).get("auditEventId").asText()).as(outcome).isNotEqualTo("AUD-004");
+        }
+        JsonNode all = getAsViewer("/api/v1/audit-events").getBody();
+        assertThat(all).isNotNull();
+        assertThat(all.get("totalItems").asInt()).isEqualTo(4);
     }
 
     @Test
@@ -263,6 +320,23 @@ class DashboardApiTest {
                 auditEventId,
                 requestId,
                 java.sql.Timestamp.from(Instant.parse(requestedAt)));
+    }
+
+    private void insertOutcomeUnknownAudit(
+            String auditEventId, String requestId, String requestedAt, String detectedAt) {
+        jdbcTemplate.update(
+                """
+                insert into audit_events (
+                    audit_event_id, request_id, trace_id, agent_id, agent_run_id,
+                    case_id, target_consumer_id, requested_tool, status, requested_at,
+                    outcome_unknown_detected_at, version)
+                values (?, ?, 'trace-1', 'LOAN-AGENT-01', 'RUN-001',
+                    'LOAN-2026-001', 'CUST-1001', 'CREDIT_SCORE_READ', 'OUTCOME_UNKNOWN', ?, ?, 0)
+                """,
+                auditEventId,
+                requestId,
+                java.sql.Timestamp.from(Instant.parse(requestedAt)),
+                java.sql.Timestamp.from(Instant.parse(detectedAt)));
     }
 
     private void insertAudit(

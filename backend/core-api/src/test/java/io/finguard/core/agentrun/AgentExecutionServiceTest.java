@@ -92,6 +92,54 @@ class AgentExecutionServiceTest {
                 .isEqualTo(AuditStatus.COMPLETED);
     }
 
+    /**
+     * 단위 0 재현에서 결과 기록이 사라진 실행은 "완료, 시도 0건"으로 보였다. 결과를 모르는 시도는
+     * attempts에 싣지 않되, 실행 사유로 드러낸다 — docs/04 §3.
+     */
+    @Test
+    void marksTheRunWhenAnAttemptOutcomeNeverArrived() {
+        AgentRun run = run(AgentRunStatus.COMPLETED);
+        AuditEvent unknown = mock(AuditEvent.class);
+        when(unknown.getStatus()).thenReturn(AuditStatus.OUTCOME_UNKNOWN);
+        when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run));
+        when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1"))
+                .thenReturn(List.of(unknown));
+
+        AgentExecutionResponse response = service.find("RUN-1", viewer());
+
+        assertThat(response.attempts()).isEmpty();
+        assertThat(response.reasonCodes()).containsExactly("AUDIT_OUTCOME_UNKNOWN");
+    }
+
+    @Test
+    void keepsKnownAttemptsAndTheirReasonsNextToAnUnknownOne() {
+        AgentRun run = run(AgentRunStatus.COMPLETED);
+        AuditEvent unknown = mock(AuditEvent.class);
+        AuditEvent blocked = mock(AuditEvent.class);
+        when(unknown.getStatus()).thenReturn(AuditStatus.OUTCOME_UNKNOWN);
+        when(blocked.getStatus()).thenReturn(AuditStatus.COMPLETED);
+        when(blocked.getRequestId()).thenReturn("REQ-2");
+        when(blocked.getRequestedTool()).thenReturn(Tool.INCOME_READ);
+        when(blocked.getTargetConsumerId()).thenReturn("CUST-2099");
+        when(blocked.getRequestedData()).thenReturn(Set.of(DataType.INCOME));
+        when(blocked.getDecision()).thenReturn(PolicyDecision.BLOCK);
+        when(blocked.getReasonCodes()).thenReturn(Set.of("CASE_SCOPE_VIOLATION"));
+        when(blocked.getDownstreamReached()).thenReturn(false);
+        when(blocked.getResponseReleased()).thenReturn(false);
+        when(blocked.getRequestedAt()).thenReturn(Instant.parse("2026-08-17T12:00:02Z"));
+        when(blocked.getCompletedAt()).thenReturn(Instant.parse("2026-08-17T12:00:03Z"));
+        when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run));
+        when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1"))
+                .thenReturn(List.of(unknown, blocked));
+
+        AgentExecutionResponse response = service.find("RUN-1", viewer());
+
+        assertThat(response.attempts()).extracting(AgentExecutionResponse.Attempt::requestId)
+                .containsExactly("REQ-2");
+        assertThat(response.reasonCodes())
+                .containsExactly("AUDIT_OUTCOME_UNKNOWN", "CASE_SCOPE_VIOLATION");
+    }
+
     @Test
     void operatorCannotReadAnotherEmployeesRun() {
         when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run(AgentRunStatus.RUNNING)));
