@@ -1,0 +1,9 @@
+# F1 normal-path variant, layered after docker-compose.f1-repro.yml.
+#
+# Undoes the injected failure: the gateway talks to core-api directly and nothing is delayed.
+# Used to measure how long a successful outcome takes after the audit start (the basis for
+# the 60 s OUTCOME_UNKNOWN threshold).
+services:
+  gateway:
+    environment:
+      CORE_URL: http://core-api:8080

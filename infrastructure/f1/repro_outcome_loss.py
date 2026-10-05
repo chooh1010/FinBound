@@ -1,13 +1,15 @@
 """F1 reproduction: start one real AgentRun and report what happened to its audit row.
 
 Usage:
-    python repro_outcome_loss.py <env-file> --mode {inject-503,pause,pause-kill}
-        [--wait-seconds N] [--pause-seconds N]
+    python repro_outcome_loss.py <env-file> --mode {inject-503,pause,pause-kill,normal}
+        [--wait-seconds N] [--pause-seconds N] [--runs N]
 
 Modes (the stack must already be up with the matching overlays, see docker-compose.f1-*.yml):
     inject-503  repro overlay: the outcome PATCH is answered 503 by the core proxy
     pause       pause overlay: freeze core-api once the call reached finance, thaw it later
     pause-kill  pause overlay: same, but SIGKILL core-api at the end of the pause, then restart
+    normal      normal overlay: no failure; run N AgentRuns and report success-path latency
+                (gateway completedAt - requestedAt), the basis for the OUTCOME_UNKNOWN threshold
 
 The env file is read only for the operator credential; no value is printed.
 Prompt text and financial payloads are never printed (AGENTS.md).
@@ -35,6 +37,7 @@ COMPOSE_FILES = {
               "f1/docker-compose.f1-repro.yml", "f1/docker-compose.f1-pause.yml"],
 }
 COMPOSE_FILES["pause-kill"] = COMPOSE_FILES["pause"]
+COMPOSE_FILES["normal"] = COMPOSE_FILES["inject-503"] + ["f1/docker-compose.f1-normal.yml"]
 
 CORE_URL_TEMPLATE = "http://127.0.0.1:{port}"
 DEFAULT_CORE_PORT = "18080"
@@ -47,6 +50,20 @@ SCENARIO = "NORMAL_CREDIT_SCORE"
 
 DEFAULT_WAIT_SECONDS = 70
 DEFAULT_PAUSE_SECONDS = 5
+DEFAULT_RUNS = 30
+FINAL_STATUSES = ("COMPLETED", "ERROR")
+NORMAL_FINAL_WAIT_SECONDS = 20
+NORMAL_POLL_SECONDS = 0.25
+# The gateway allows 30 calls per agent per minute (hard limit); stay well under it.
+NORMAL_GAP_SECONDS = 3.0
+TIMING_SQL = (
+    "select status,"
+    " round(extract(epoch from (outcome_unknown_detected_at - received_at))::numeric, 3),"
+    " round(extract(epoch from (completed_at - requested_at))::numeric * 1000),"
+    " round(extract(epoch from (received_at - requested_at))::numeric * 1000),"
+    " coalesce(decision, '-'), coalesce(success::text, '-')"
+    " from audit_events where agent_run_id = '{agent_run_id}' order by requested_at limit 1"
+)
 POLL_INTERVAL_SECONDS = 5
 FINANCE_POLL_SECONDS = 0.05
 FINANCE_WAIT_SECONDS = 10
@@ -55,7 +72,7 @@ COMMAND_TIMEOUT_SECONDS = 60
 HTTP_TIMEOUT_SECONDS = 30
 BEHAVIOR_WINDOW = "5 minutes"
 AUDIT_COLUMNS = ("request_id, status, decision, downstream_reached, response_released, "
-                 "requested_at, completed_at")
+                 "requested_at, completed_at, outcome_unknown_detected_at")
 FINANCE_COUNT_COMMAND = (
     "curl -s -X POST localhost:8080/__admin/requests/count "
     "-d '{\"method\":\"ANY\",\"urlPattern\":\".*\"}'"
@@ -236,12 +253,63 @@ def gateway_outcome_errors(stack: Stack, since: str) -> list[str]:
     return [line for line in output.splitlines() if "Audit outcome update failed" in line]
 
 
+def audit_timing(stack: Stack, agent_run_id: str) -> list[str]:
+    row = stack.compose("exec", "-T", "postgres", "psql", "-U", DB_USER, "-d", DB_NAME, "-A", "-t", "-F", "|",
+                        "-c", TIMING_SQL.format(agent_run_id=agent_run_id), what="psql timing")
+    return row.split("|") if row else []
+
+
+def report_detection(stack: Stack, agent_run_id: str) -> None:
+    timing = audit_timing(stack, agent_run_id)
+    if not timing:
+        raise ReproError("no audit row for the run")
+    status, detected_after_receipt = timing[0], timing[1]
+    # received_at is the DB clock, detected_at the core-api clock; both run on this host.
+    log(f"RESULT status={status} detected_after_receipt_s={detected_after_receipt or '-'}")
+
+
+def percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, round(fraction * (len(ordered) - 1))))
+    return ordered[index]
+
+
+def measure_success_path(stack: Stack, base_url: str, env: dict[str, str], runs: int) -> None:
+    latencies: list[float] = []
+    receipt_offsets: list[float] = []
+    # status/decision/success per run. COMPLETED alone also covers a policy BLOCK, so the
+    # decision is recorded to show which path was actually measured.
+    outcomes: dict[str, int] = {}
+    for run_index in range(runs):
+        agent_run_id = start_run(base_url, env["OPERATOR_CREDENTIAL"], env["OPERATOR_EMPLOYEE_ID"])
+        deadline = time.monotonic() + NORMAL_FINAL_WAIT_SECONDS
+        timing = audit_timing(stack, agent_run_id)
+        while not timing or timing[0] not in FINAL_STATUSES:
+            if time.monotonic() >= deadline:
+                raise ReproError(f"run {run_index} did not finalize within {NORMAL_FINAL_WAIT_SECONDS}s")
+            time.sleep(NORMAL_POLL_SECONDS)
+            timing = audit_timing(stack, agent_run_id)
+        key = f"{timing[0]}/{timing[4]}/success={timing[5]}"
+        outcomes[key] = outcomes.get(key, 0) + 1
+        latencies.append(float(timing[2]))
+        receipt_offsets.append(float(timing[3]))
+        time.sleep(NORMAL_GAP_SECONDS)
+    log(f"RESULT runs={runs} outcomes={outcomes}")
+    # completedAt is taken before the outcome PATCH, so this excludes the final Core call.
+    log("RESULT start->outcome ms (gateway clock, excludes the outcome PATCH): "
+        f"p50={percentile(latencies, 0.5):.0f} p95={percentile(latencies, 0.95):.0f} max={max(latencies):.0f}")
+    # Cross-clock value (gateway clock vs DB clock on the same host), not pure transport time.
+    log("RESULT gateway requestedAt -> DB received_at ms (cross-clock): "
+        f"p50={percentile(receipt_offsets, 0.5):.0f} max={max(receipt_offsets):.0f}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("env_file", type=Path)
     parser.add_argument("--mode", required=True, choices=sorted(COMPOSE_FILES))
     parser.add_argument("--wait-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     parser.add_argument("--pause-seconds", type=int, default=DEFAULT_PAUSE_SECONDS)
+    parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
     args = parser.parse_args()
 
     env = read_env(args.env_file.resolve())
@@ -252,11 +320,15 @@ def main() -> int:
     try:
         log(f"mode={args.mode}")
         record_conditions(stack)
+        if args.mode == "normal":
+            measure_success_path(stack, base_url, env, args.runs)
+            return 0
         finance_before = finance_request_count(stack) if args.mode != "inject-503" else 0
         agent_run_id = start_run(base_url, env["OPERATOR_CREDENTIAL"], env["OPERATOR_EMPLOYEE_ID"])
         if args.mode != "inject-503":
             pause_core(stack, finance_before, args.pause_seconds, kill=args.mode == "pause-kill")
         observe(stack, agent_run_id, args.wait_seconds)
+        report_detection(stack, agent_run_id)
         errors = gateway_outcome_errors(stack, since)
     except ReproError as error:
         log(f"INVALID RUN: {error}")
