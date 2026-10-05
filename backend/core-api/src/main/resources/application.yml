@@ -78,6 +78,11 @@ finguard:
       window: 60s
       block-threshold: 5
       risk-flag-threshold: 3
+    reevaluation:
+      # 후보 정책 전용 OPA. 운영 OPA(Gateway가 쓰는)와 분리한다.
+      candidate-opa-url: ${CANDIDATE_OPA_URL:http://localhost:8182}
+      opa-timeout: 2s
+      poll-timeout: 1s
 
 management:
   endpoints:
