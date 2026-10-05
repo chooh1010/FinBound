@@ -92,6 +92,8 @@ services:
   core-api:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # 아웃박스 → Kafka 릴레이를 켠다(기본 스택에서는 꺼져 있다).
+      EVENT_RELAY_ENABLED: "true"
       CANDIDATE_OPA_URL: http://opa-candidate:8181
 
 volumes:

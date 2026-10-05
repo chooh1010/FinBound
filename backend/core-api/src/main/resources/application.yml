@@ -9,6 +9,19 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+  kafka:
+    # 도구 호출 이벤트 스트림. 릴레이가 꺼져 있으면(기본) 아무도 접속하지 않는다.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      # 브로커가 기록을 확정한 뒤에만 ack. 멱등 프로듀서는 재시도 중복과 순서 뒤바뀜을 막는다.
+      acks: all
+      properties:
+        enable.idempotence: true
+        # 브로커가 죽어 있을 때 send()가 메타데이터를 기다리며 릴레이 스레드를 붙잡는 상한.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        linger.ms: 0
   flyway:
     # 경로를 오타 내면 조용히 무시되는 대신 기동에 실패한다. 시드 경로가 무시되면 기동은 성공하는데
     # 데모 데이터가 없어서, 원인이 로그에 남지 않는 실패가 된다.
@@ -45,6 +58,16 @@ finguard:
       threshold: ${AUDIT_RECONCILIATION_THRESHOLD:60s}
       interval: ${AUDIT_RECONCILIATION_INTERVAL:5s}
       batch-size: ${AUDIT_RECONCILIATION_BATCH_SIZE:100}
+  events:
+    relay:
+      # 아웃박스 → Kafka 릴레이. Kafka가 없는 기본 스택에서는 끈다(K 덧씌우기에서 켠다).
+      # 꺼져 있어도 이벤트는 아웃박스에 쌓인다 — 켜는 순간 쌓인 순서대로 발행된다.
+      enabled: ${EVENT_RELAY_ENABLED:false}
+      topic: ${EVENT_RELAY_TOPIC:finguard.tool-call.events.v1}
+      interval: ${EVENT_RELAY_INTERVAL:500ms}
+      batch-size: ${EVENT_RELAY_BATCH_SIZE:100}
+      # ack 대기 상한. 이 안에 ack가 없으면 그 행은 미발행으로 남고 다음 주기에 다시 보낸다.
+      send-timeout: ${EVENT_RELAY_SEND_TIMEOUT:10s}
 
 management:
   endpoints:
