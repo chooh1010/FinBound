@@ -23,7 +23,7 @@ from datasets.synthetic_behavior import (
     split_behavior_samples,
 )
 
-MODEL_VERSION = "iforest-1"
+MODEL_VERSION = "iforest-2"
 MAX_VALIDATION_FALSE_POSITIVE_RATE = 0.10
 ALERT_NORMAL_QUANTILE = 0.90
 STRESS_TEST_SEEDS = (7, 43, 99, 2026, 7777)

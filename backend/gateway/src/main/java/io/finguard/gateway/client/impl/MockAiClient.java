@@ -25,6 +25,6 @@ public class MockAiClient implements AiClient {
                                                String traceparent,
                                                Instant requestedAt) {
         return new BehaviorRiskResult(0.10, "LOW", false, -0.01, "COLD_START",
-            "behavior-features-1", "iforest-1");
+            "behavior-features-2", "iforest-2");
     }
 }

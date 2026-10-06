@@ -2,7 +2,7 @@ package finguard.authorization
 
 import rego.v1
 
-policy_version := "loan-review-policy-1"
+policy_version := "loan-review-policy-2"
 
 scope_status_keys := {
     "employeeAuthority",
@@ -58,7 +58,9 @@ deny_reasons contains "CASE_SCOPE_VIOLATION" if { input.scopeStatus.customerScop
 deny_reasons contains "TOOL_SCOPE_VIOLATION" if { input.scopeStatus.toolScope == "VIOLATION" }
 deny_reasons contains "DATA_SCOPE_VIOLATION" if { input.scopeStatus.dataScope == "VIOLATION" }
 deny_reasons contains "PROMPT_INJECTION" if { input.risk.promptRiskLevel == "CRITICAL" }
-deny_reasons contains "BEHAVIOR_ANOMALY" if { input.risk.behaviorRiskLevel == "CRITICAL" }
+# 행동 CRITICAL만으로는 차단하지 않는다(policy-2). Isolation Forest 점수는 극단에서 포화돼 업무시간
+# 빠른 반복과 야간 누적을 안정적으로 가르지 못한다 — 같은 학습 코드에서도 시드에 따라 빠른 반복의
+# CRITICAL 비율이 0%~62.5%로 흔들렸다. 심각도를 다시 설계할 때까지 행동 신호는 플래그로만 남긴다.
 deny_reasons contains "HARD_REQUEST_LIMIT_EXCEEDED" if { input.limits.hardRequestLimitExceeded }
 
 decision := {
@@ -72,10 +74,10 @@ decision := {
 }
 
 risk_flagged := true if { input.risk.promptRiskLevel == "ALERT" }
-risk_flagged := true if { input.risk.behaviorRiskLevel == "ALERT" }
+risk_flagged := true if { input.risk.behaviorRiskLevel in {"ALERT", "CRITICAL"} }
 risk_flagged := false if {
     input.risk.promptRiskLevel != "ALERT"
-    input.risk.behaviorRiskLevel != "ALERT"
+    input.risk.behaviorRiskLevel == "LOW"
 }
 
 allow_severity := "HIGH" if { risk_flagged }

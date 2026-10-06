@@ -274,6 +274,11 @@ CRITICAL
 
 `behaviorRisk`는 공격 확률이라고 표현하지 않는다.
 
+> **`loan-review-policy-2`부터 행동 CRITICAL만으로는 차단하지 않는다.** Isolation Forest 점수는 극단에서
+> 포화돼 업무시간 빠른 반복과 야간 누적을 안정적으로 가르지 못한다(같은 학습 코드에서 시드에 따라 빠른 반복의
+> CRITICAL 비율이 0%~62.5%). 심각도를 다시 설계할 때까지 행동 CRITICAL은 ALERT처럼 `riskFlagged=true`로
+> 허용하고, `BEHAVIOR_ANOMALY`는 예약 코드로 둔다. 근거: `ai-risk/models/behavior_iforest_model_card.md`.
+
 ---
 
 ## 16. Tool Enum
@@ -370,7 +375,7 @@ UNKNOWN_PROMPT_ATTACK
 | Code | 의미 |
 |---|---|
 | `PROMPT_INJECTION` | Prompt Injection 차단 조건 충족 |
-| `BEHAVIOR_ANOMALY` | Behavior Critical Threshold 충족 |
+| `BEHAVIOR_ANOMALY` | Behavior Critical Threshold 충족 (`loan-review-policy-2`에서는 단독으로 내지 않음, §15) |
 | `HARD_REQUEST_LIMIT_EXCEEDED` | Deterministic Hard Limit 초과 |
 | `PROMPT_RISK_UNAVAILABLE` | Prompt 분석 실패 |
 | `BEHAVIOR_RISK_UNAVAILABLE` | Behavior 분석 실패 |
@@ -448,8 +453,8 @@ templateVersion
 
 ```text
 prompt-guard-6
-iforest-1
-behavior-features-1
+iforest-2
+behavior-features-2
 synthetic-agent-log-1
 loan-review-policy-1
 ```

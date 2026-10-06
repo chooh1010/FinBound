@@ -59,8 +59,8 @@ def test_behavior_endpoint_returns_contract_and_ready_status() -> None:
     assert payload["behaviorRiskLevel"] == "LOW"
     assert payload["isAnomaly"] is False
     assert payload["historyStatus"] == "READY"
-    assert payload["featureVersion"] == "behavior-features-1"
-    assert payload["modelVersion"] == "iforest-1"
+    assert payload["featureVersion"] == "behavior-features-2"
+    assert payload["modelVersion"] == "iforest-2"
     assert "decision" not in payload
     assert payload["isAnomaly"] is (payload["behaviorRiskLevel"] != "LOW")
 

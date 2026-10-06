@@ -15,10 +15,17 @@ from app.schemas.behavior import (
     FinancialTool,
 )
 
-DATASET_VERSION = "synthetic-agent-log-4"
+DATASET_VERSION = "synthetic-agent-log-5"
 SAMPLES_PER_SESSION = 8
 WARMUP_EVENTS = 24
 HARD_REQUEST_LIMIT_1M = 30
+# A legitimate agent is sometimes blocked a few times in a row (a stale passport, a tool outside
+# its scope). Sessions of both classes get such a burst at the same rate, so a burst is neither a
+# sign of an attack nor a sign of normal behavior; any rolling 5 minutes holds at most a few blocks.
+BLOCK_BURST_SESSION_RATE = 0.08
+BLOCK_BURST_MAX_SIZE = 3
+MAX_BLOCKS_PER_WINDOW = 3
+BLOCK_WINDOW = timedelta(minutes=5)
 KST = timezone(timedelta(hours=9))
 TOOLS = tuple(FinancialTool)
 NORMAL_SCENARIOS = (
@@ -143,6 +150,10 @@ def _session_vectors(
     base_case_id = f"CASE-{session_index:03d}"
     base_consumer_id = f"CUST-{session_index:04d}"
     session_tool = _tool_for(rng)
+    has_block_burst = rng.random() < BLOCK_BURST_SESSION_RATE
+    burst_size = int(rng.integers(1, BLOCK_BURST_MAX_SIZE + 1))
+    # Start the burst just before or inside the sampled events so it shows up in their windows.
+    burst_start = int(rng.integers(WARMUP_EVENTS - 4, WARMUP_EVENTS + SAMPLES_PER_SESSION - 1))
 
     for event_index in range(WARMUP_EVENTS + SAMPLES_PER_SESSION):
         if anomalous:
@@ -180,9 +191,17 @@ def _session_vectors(
         normal_error_probability = 0.04 if profile == "shifted" else 0.02
         normal_block_probability = 0.03 if profile == "shifted" else 0.02
         decision = Decision.BLOCK if rng.random() < normal_block_probability else Decision.ALLOW
+        if has_block_burst and burst_start <= event_index < burst_start + burst_size:
+            decision = Decision.BLOCK
+        recent_blocks = sum(
+            event.decision is Decision.BLOCK
+            for event in history
+            if event.requested_at > current_time - BLOCK_WINDOW
+        )
+        if recent_blocks >= MAX_BLOCKS_PER_WINDOW:
+            decision = Decision.ALLOW
         allowed = decision is Decision.ALLOW
         success = rng.random() >= normal_error_probability if allowed else None
-        # Draw latency even for BLOCK so the random stream (and the committed dataset) stays the same.
         latency_ms = _latency_ms(rng, tool)
 
         history.append(

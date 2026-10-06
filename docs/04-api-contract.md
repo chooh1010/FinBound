@@ -761,8 +761,8 @@ POST /internal/v1/risk/behavior
   "isAnomaly": true,
   "rawScore": -0.14,
   "historyStatus": "READY",
-  "featureVersion": "behavior-features-1",
-  "modelVersion": "iforest-1"
+  "featureVersion": "behavior-features-2",
+  "modelVersion": "iforest-2"
 }
 ```
 
