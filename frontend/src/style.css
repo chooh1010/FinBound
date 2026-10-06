@@ -959,3 +959,6 @@ main { padding: 30px clamp(28px, 3.2vw, 48px) 48px; }
   .event-list-heading small, .filter-heading small { display: none; }
   .event-detail { padding: 18px; }
 }
+
+/* 역할 확인 실패 안내 */
+.role-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; background: #fff7e6; }

@@ -1,37 +1,73 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import brandLogoDark from './assets/finbound-logo-dark.png'
 import brandWordmark from './assets/finbound-wordmark.png'
 import AgentRunView from './views/AgentRunView.vue'
+import ApprovalsView from './views/ApprovalsView.vue'
 import DashboardView from './views/DashboardView.vue'
 import { finboundApi } from './services/finboundApi'
 
-const screens = [
+const allScreens = [
   { id: 'run', labelParts: ['AI 업무 지원'], kicker: '01', subtitle: 'AI Agent가 안전하게 업무를 지원하도록 권한을 최소화합니다.' },
   { id: 'dashboard', labelParts: ['AI 업무', '안전 현황'], kicker: '02', subtitle: 'AI 업무 처리 기록과 보호 설정의 작동 결과를 한눈에 확인합니다.' },
+  { id: 'approvals', labelParts: ['승인 요청'], kicker: '03', subtitle: '정책이 사람의 확인을 요구한 조회를 승인하거나 거절합니다.' },
 ]
 const activeScreen = ref('run')
 const realMode = finboundApi.isRealMode()
 const credential = ref('')
 const sessionReady = ref(!realMode || finboundApi.hasCredential())
+// 메뉴를 고르는 데만 쓴다. 권한은 Core가 Endpoint마다 판단한다(docs/04 §15.1).
+const role = ref(null)
+const roleError = ref(false)
+// 세션마다 번호를 올린다. 로그아웃 뒤 늦게 도착한 역할 응답이 새 세션의 메뉴를 덮지 않게.
+let sessionGeneration = 0
+const screens = computed(() => allScreens.filter((screen) => (
+  role.value === 'APPROVER' ? screen.id !== 'run' : screen.id !== 'approvals'
+)))
 const activeComponent = computed(() => ({
   run: AgentRunView,
   dashboard: DashboardView,
+  approvals: ApprovalsView,
 })[activeScreen.value])
-const activeScreenConfig = computed(() => screens.find((screen) => screen.id === activeScreen.value))
+const activeScreenConfig = computed(() => allScreens.find((screen) => screen.id === activeScreen.value))
 const screenLabel = (screen) => screen.labelParts.join(' ')
 
-function startSession() {
+async function loadRole() {
+  const generation = sessionGeneration
+  roleError.value = false
+  let loaded = null
+  try {
+    loaded = (await finboundApi.getMe())?.role ?? null
+  } catch {
+    // 역할을 모르면 기존 메뉴를 보인다. 승인 메뉴는 승인자로 확인된 때만 연다. 다시 시도할 수 있게 알린다.
+    if (generation === sessionGeneration) roleError.value = true
+  }
+  if (generation !== sessionGeneration) return
+  role.value = loaded
+  if (role.value === 'APPROVER') activeScreen.value = 'approvals'
+}
+
+onMounted(() => {
+  if (sessionReady.value) loadRole()
+})
+
+async function startSession() {
   if (!credential.value.trim()) return
+  // 앞선 시작이 역할 응답을 기다리는 중이어도 이 시작이 이긴다.
+  sessionGeneration += 1
   finboundApi.setCredential(credential.value.trim())
   credential.value = ''
+  await loadRole()
   sessionReady.value = true
 }
 
 function endSession() {
+  sessionGeneration += 1
   finboundApi.clearCredential()
   sessionReady.value = false
+  role.value = null
+  roleError.value = false
   activeScreen.value = 'run'
 }
 </script>
@@ -75,14 +111,20 @@ function endSession() {
         <h2 id="credential-heading">업무 세션 Credential을 입력해 주세요</h2>
         <p>Credential은 현재 브라우저 메모리에서만 사용하며 Web Storage나 빌드 파일에 저장하지 않습니다.</p>
         <form @submit.prevent="startSession">
-          <label for="core-credential">Operator 또는 Viewer Credential</label>
+          <label for="core-credential">Operator, Viewer 또는 Approver Credential</label>
           <div>
             <input id="core-credential" v-model="credential" type="password" autocomplete="off" spellcheck="false" required />
             <button class="primary-button" type="submit">Core API 연결</button>
           </div>
         </form>
       </section>
-      <component v-else :is="activeComponent" />
+      <template v-else>
+        <p v-if="roleError" class="role-warning" role="alert">
+          역할을 확인하지 못해 기본 메뉴를 보이고 있습니다. 승인자라면 다시 확인해 주세요.
+          <button class="session-end" type="button" @click="loadRole">역할 다시 확인</button>
+        </p>
+        <component :is="activeComponent" />
+      </template>
     </main>
   </div>
 </template>

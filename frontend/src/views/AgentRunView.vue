@@ -87,7 +87,14 @@ const executionStateLabel = computed(() => {
   if (execution.value?.status === 'RUNNING') return '업무 실행 중'
   if (execution.value?.status === 'ERROR' || errorAttempts.value.length) return '업무 오류'
   if (execution.value?.outcomeUnknown) return '결과 미확인'
-  if (execution.value?.approvalPending) return `승인 대기 ${approvalAttempts.value.length}건`
+  if (execution.value?.approvalPending) {
+    // 지금 기다리는 승인 요청 수. 옛 Core처럼 목록이 없으면 판정 기록 수로 대신한다.
+    return `승인 대기 ${execution.value.pendingApprovalCount || approvalAttempts.value.length}건`
+  }
+  if (execution.value?.rerunApproval) return '승인됨 · 다시 실행 필요'
+  if (execution.value?.approvalUsedElsewhere) return '승인 사용됨 · 다시 실행 결과 확인'
+  if (execution.value?.approvalRejected) return '승인 거절'
+  if (execution.value?.approvalExpired) return '승인 기한 지남'
   return blockedAttempts.value.length ? `업무 완료 · 보호 ${blockedAttempts.value.length}건` : '업무 완료'
 })
 const isReviewReady = computed(() => Boolean(
@@ -96,23 +103,51 @@ const isReviewReady = computed(() => Boolean(
   && execution.value.status === 'COMPLETED'
   && errorAttempts.value.length === 0
   && !execution.value.outcomeUnknown
-  // 승인을 기다리는 조회는 실행되지 않았다. 자료 확인이 끝났다고 보이면 안 된다.
+  // 승인을 기다리거나, 승인됐지만 다시 실행하지 않았거나, 거절·만료된 조회는 실행되지 않았다.
+  // 자료 확인이 끝났다고 보이면 안 된다.
   && !execution.value.approvalPending
+  && !execution.value.rerunApproval
+  && !execution.value.approvalUsedElsewhere
+  && !execution.value.approvalRejected
+  && !execution.value.approvalExpired
   && !loading.value,
 ))
 
+// 실행 결과는 그 실행을 시작한 업무에 묶는다. 업무를 바꾼 뒤 늦게 도착한 응답은 버린다 — 다른 업무 아래 보이면
+// 그 승인으로 엉뚱한 업무를 다시 실행하게 된다.
+let currentRun = 0
+const executionWorkId = ref('')
+
 watch(selectedWorkId, () => {
+  currentRun += 1
   execution.value = null
   executionError.value = ''
+  loading.value = false
 })
 
-async function runAgentTask() {
+async function runAgentTask(approvalRequestId) {
+  currentRun += 1
+  const run = currentRun
+  // 다시 실행은 승인을 만든 실행의 업무로 보낸다. 선택된 카드가 아니다.
+  const workId = approvalRequestId ? executionWorkId.value : selectedWorkId.value
   loading.value = true
   execution.value = null
   executionError.value = ''
   try {
-    execution.value = await finboundApi.executeAgentTask({ workId: selectedWorkId.value })
+    const result = await finboundApi.executeAgentTask({
+      workId,
+      ...(approvalRequestId ? { approvalRequestId } : {}),
+    })
+    if (run !== currentRun) return
+    execution.value = result
+    executionWorkId.value = workId
   } catch (error) {
+    if (run !== currentRun) return
+    if (error?.code === 'APPROVAL_NOT_APPLICABLE') {
+      // 실행이 만들어지지 않았다. Core가 이 실행에 쓸 수 없다고 판단했다.
+      executionError.value = '이 승인으로는 다시 실행할 수 없습니다. 기한이 지났거나, 이미 사용했거나, 원래 요청과 다른 업무입니다.'
+      return
+    }
     if (error?.executionContext) {
       execution.value = {
         status: 'ERROR',
@@ -122,7 +157,21 @@ async function runAgentTask() {
     }
     executionError.value = '업무 처리 결과를 확인하지 못했습니다. 금융시스템 조회 여부는 업무 기록에서 확인해 주세요.'
   } finally {
-    loading.value = false
+    if (run === currentRun) loading.value = false
+  }
+}
+
+// 승인자의 판단은 실행이 끝난 뒤에 온다. 같은 실행을 다시 읽어 승인 상태를 갱신한다.
+async function refreshApprovalState() {
+  const run = currentRun
+  loading.value = true
+  try {
+    const refreshed = await finboundApi.refreshAgentExecution(execution.value)
+    if (run === currentRun) execution.value = refreshed
+  } catch {
+    if (run === currentRun) executionError.value = '승인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  } finally {
+    if (run === currentRun) loading.value = false
   }
 }
 </script>
@@ -179,7 +228,7 @@ async function runAgentTask() {
           <span :class="{ current: isReviewReady }"><i>3</i><strong>심사 의견</strong><small>{{ isReviewReady ? '진행 중' : '예정' }}</small></span>
         </div>
 
-        <form class="agent-task-form" @submit.prevent="runAgentTask">
+        <form class="agent-task-form" @submit.prevent="runAgentTask()">
           <div class="assistant-intro">
             <span class="assistant-avatar" aria-hidden="true"><svg class="soft-shield-icon" viewBox="0 0 24 24"><path class="shield-fill" d="M12 2.7c2.35 1.45 4.75 2.35 7.2 2.9v5.15c0 4.75-2.8 8.4-7.2 10.55-4.4-2.15-7.2-5.8-7.2-10.55V5.6c2.45-.55 4.85-1.45 7.2-2.9Z" /><path class="shield-symbol" d="M12 8v8M8 12h8" /></svg></span>
             <div><h3>AI 업무 도우미</h3><p>반복적인 자료 확인을 대신하고, 결과를 현재 대출 신청 건에 정리합니다.</p></div>
@@ -311,6 +360,8 @@ async function runAgentTask() {
             <ul><li v-for="item in execution.resultItems" :key="item">{{ item }}</li></ul>
             <div v-if="blockedAttempts.length" class="protection-summary"><strong>FinBound 보호 작동</strong><p>차단된 추가 조회는 금융시스템에 전달되지 않았습니다. 현재 고객의 정상 심사자료만 결과에 포함했습니다.</p></div>
             <div class="next-action safe"><strong>다음 업무</strong>{{ execution.nextAction }}</div>
+            <button v-if="execution.rerunApproval" class="primary-button rerun-approved-button" type="button" :disabled="loading" @click="runAgentTask(execution.rerunApproval.approvalRequestId)">승인된 요청 다시 실행</button>
+            <button v-else-if="execution.approvalPending && execution.agentRun" class="session-end refresh-approval-button" type="button" :disabled="loading" @click="refreshApprovalState">승인 상태 새로 확인</button>
           </aside>
         </div>
       </template>

@@ -477,6 +477,8 @@ const mockApi = {
     throw new FinboundApiError('Approval decisions require the Core API', { code: 'APPROVAL_REQUIRES_CORE_API' })
   },
   async getBankWorkCatalog() { return clone(bankWorkCatalogFixture) },
+  // Mock 실행 결과는 바뀌지 않는다.
+  async refreshAgentExecution(execution) { return clone(execution) },
   async executeAgentTask({ workId }) {
     const execution = agentExecutionFixtures[workId]
     if (!execution) throw new Error('Unsupported Agent task')
@@ -537,6 +539,11 @@ const realApi = {
     })
   },
   async getBankWorkCatalog() { return clone(bankWorkCatalogFixture) },
+  // 승인자가 나중에 판단하면 실행 결과(승인 상태)가 바뀐다. 같은 실행을 다시 읽는다.
+  async refreshAgentExecution({ agentRun, permission }) {
+    const execution = await getAgentExecution(agentRun.agentRunId)
+    return mapAgentExecution(agentRun, permission, execution)
+  },
   async executeAgentTask({ workId, approvalRequestId }) {
     const work = bankWorkCatalogFixture.find((candidate) => candidate.id === workId)
     if (!work) throw new FinboundApiError('Unsupported Agent task', { code: 'AGENT_TASK_UNSUPPORTED' })
@@ -636,6 +643,7 @@ export const finboundApi = {
   reject: (approvalRequestId, reason) => activeApi().decideApproval(approvalRequestId, 'reject', reason),
   getBankWorkCatalog: (...args) => activeApi().getBankWorkCatalog(...args),
   executeAgentTask: (...args) => activeApi().executeAgentTask(...args),
+  refreshAgentExecution: (...args) => activeApi().refreshAgentExecution(...args),
   getAuditEvents: (...args) => activeApi().getAuditEvents(...args),
   getAuditEvent: (...args) => activeApi().getAuditEvent(...args),
   getDashboardSummary: (...args) => activeApi().getDashboardSummary(...args),
