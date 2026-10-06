@@ -1282,15 +1282,18 @@ OPA 판정 시점에 기록된 `severity`와 `riskFlagged` 감사 필드를 사�
 
 ```http
 GET  /api/v1/approval-requests?status=PENDING
-POST /api/v1/approval-requests/{approvalRequestId}/approve   {"note": "선택"}
-POST /api/v1/approval-requests/{approvalRequestId}/reject    {"note": "선택"}
+POST /api/v1/approval-requests/{approvalRequestId}/approve   {"reason": "CONFIRMED_BUSINESS_NEED"}   # reason 선택
+POST /api/v1/approval-requests/{approvalRequestId}/reject    {"reason": "SUSPICIOUS_ACTIVITY"}
 GET  /api/v1/me                                              → {"role": "APPROVER", "employeeId": "EMP-201"}
 ```
 
 APPROVER만 승인 API를 부른다(`/me`는 모든 역할). 다른 역할의 유효한 Credential은 `403 CORE_API_ROLE_FORBIDDEN`,
 Credential이 없거나 틀리면 `401`이다(§2). 승인자 설정이 없으면 APPROVER 역할이 없을 뿐 다른 역할은 그대로 동작한다.
 
-목록: `status`는 `PENDING | APPROVED | REJECTED | EXPIRED | CONSUMED`(생략하면 `PENDING`, 그 밖의 값은 `400`), 최신순
+`reason`은 `CONFIRMED_BUSINESS_NEED | CUSTOMER_VERIFIED | SUSPICIOUS_ACTIVITY | OUTSIDE_TASK_SCOPE | OTHER` 중 하나다. 자유
+메모는 받지 않는다 — 승인 이벤트는 고칠 수 없는 기록이라, 붙여 넣은 고객 정보나 비밀값이 영구히 남는다. 모르는 값은 `400`.
+
+목록: `status`는 `PENDING | APPROVED | REJECTED | EXPIRED | CONSUMED`(생략하면 `PENDING`, 빈 값을 포함한 그 밖의 값은 `400`), 최신순
 최대 100건. 승인·거절은 `200`과 바뀐 항목 하나를 돌려준다. `/me`는 `{"role", "employeeId"}`이고 Viewer의 `employeeId`는 `null`.
 
 ```json

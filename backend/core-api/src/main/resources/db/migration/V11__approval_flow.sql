@@ -52,7 +52,11 @@ alter table approval_requests
     add constraint chk_approval_request_consumed_pair
         check ((consumed_by_audit_event_id is null) = (consumed_at is null));
 
-alter table approval_request_events add column note varchar(500);
+-- 승인자가 고른 사유. 자유 메모는 받지 않는다 — 이 표는 고칠 수 없어 붙여 넣은 민감정보가 영구히 남는다.
+alter table approval_request_events add column reason varchar(64);
+alter table approval_request_events
+    add constraint chk_approval_request_event_reason check (reason is null or reason in
+        ('CONFIRMED_BUSINESS_NEED', 'CUSTOMER_VERIFIED', 'SUSPICIOUS_ACTIVITY', 'OUTSIDE_TASK_SCOPE', 'OTHER'));
 alter table approval_request_events drop constraint chk_approval_request_event_type;
 alter table approval_request_events
     add constraint chk_approval_request_event_type

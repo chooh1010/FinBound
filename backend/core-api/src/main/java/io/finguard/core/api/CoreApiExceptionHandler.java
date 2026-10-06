@@ -11,12 +11,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import io.finguard.core.agentrun.AgentExecutionNotFoundException;
+import io.finguard.core.approval.ApprovalNotFoundException;
+import io.finguard.core.approval.ApprovalNotPendingException;
+import io.finguard.core.approval.InvalidApprovalStatusException;
 import io.finguard.core.audit.AuditEvidenceRejectedException;
 import io.finguard.core.audit.AuditOperationException;
 import io.finguard.core.context.ContextLookupException;
 import io.finguard.core.dashboard.AuditEventNotFoundException;
 import io.finguard.core.dashboard.PermissionComparisonNotFoundException;
 import io.finguard.core.dashboard.UnsupportedPeriodException;
+import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.history.InvalidBehaviorHistoryWindowException;
 import io.finguard.core.permission.PermissionNotIssuableException;
 import io.finguard.core.security.CoreApiAccessDeniedException;
@@ -150,6 +154,21 @@ public class CoreApiExceptionHandler {
         ProblemDetail body = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
         body.setDetail("조회 기간 값이 올바르지 않습니다.");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    @ExceptionHandler(ApprovalNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handleApprovalNotFound(ApprovalNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ProblemDetail.forStatus(HttpStatus.NOT_FOUND));
+    }
+
+    @ExceptionHandler(ApprovalNotPendingException.class)
+    public ResponseEntity<ProblemDetail> handleApprovalNotPending(ApprovalNotPendingException exception) {
+        return problem(HttpStatus.CONFLICT, ReasonCode.APPROVAL_NOT_PENDING.name(), "이미 처리됐거나 기한이 지난 승인 요청입니다.");
+    }
+
+    @ExceptionHandler(InvalidApprovalStatusException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidApprovalStatus(InvalidApprovalStatusException exception) {
+        return problem(HttpStatus.BAD_REQUEST, "INVALID_TOOL_REQUEST", "승인 요청 상태 값이 올바르지 않습니다.");
     }
 
     private ResponseEntity<ProblemDetail> problem(HttpStatus status, String reasonCode, String detail) {

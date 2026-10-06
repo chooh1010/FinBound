@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.hibernate.annotations.BatchSize;
+
 import io.finguard.core.identifier.RecordIdentifiers;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.CollectionTable;
@@ -63,6 +65,7 @@ public class ApprovalRequest {
     private ApprovalStatus status;
 
     @ElementCollection
+    @BatchSize(size = 100)
     @CollectionTable(name = "approval_request_reason_codes", joinColumns = @JoinColumn(name = "approval_request_id"))
     @Column(name = "reason_code", nullable = false, length = 64)
     private Set<String> reasonCodes = new LinkedHashSet<>();
@@ -152,22 +155,22 @@ public class ApprovalRequest {
     /**
      * 승인자가 승인한다. 요청한 직원은 승인할 수 없다(직무 분리). {@code now}는 DB 시각이다 — 기한 판정에 시계를 하나만 쓴다.
      */
-    public void approve(String approverId, String note, Instant now, Duration approvedTtl) {
+    public void approve(String approverId, ApprovalDecisionReason reason, Instant now, Duration approvedTtl) {
         requireDecidable(approverId, now);
         status = ApprovalStatus.APPROVED;
         decidedAt = now;
         decidedBy = approverId;
         validUntil = now.plus(approvedTtl);
-        append(ApprovalEventType.APPROVED, now, ApprovalActorType.EMPLOYEE, approverId, note);
+        append(ApprovalEventType.APPROVED, now, ApprovalActorType.EMPLOYEE, approverId, reason);
     }
 
     /** 승인자가 거절한다. 이 요청 한 건의 거절이다 — 같은 업무를 새로 실행하면 다시 판정된다. */
-    public void reject(String approverId, String note, Instant now) {
+    public void reject(String approverId, ApprovalDecisionReason reason, Instant now) {
         requireDecidable(approverId, now);
         status = ApprovalStatus.REJECTED;
         decidedAt = now;
         decidedBy = approverId;
-        append(ApprovalEventType.REJECTED, now, ApprovalActorType.EMPLOYEE, approverId, note);
+        append(ApprovalEventType.REJECTED, now, ApprovalActorType.EMPLOYEE, approverId, reason);
     }
 
     /**
@@ -197,8 +200,13 @@ public class ApprovalRequest {
     }
 
     /** 이벤트 순번은 지금까지의 이벤트 수 + 1이다. 호출자는 이 행을 잠근 채로 부른다 — 순번 경쟁을 잠금으로 막는다. */
-    private void append(ApprovalEventType type, Instant at, ApprovalActorType actor, String actorId, String note) {
-        events.add(new ApprovalRequestEvent(this, events.size() + 1, type, at, actor, actorId, note));
+    private void append(
+            ApprovalEventType type,
+            Instant at,
+            ApprovalActorType actor,
+            String actorId,
+            ApprovalDecisionReason reason) {
+        events.add(new ApprovalRequestEvent(this, events.size() + 1, type, at, actor, actorId, reason));
     }
 
     static String dataKey(Set<DataType> requestedData) {

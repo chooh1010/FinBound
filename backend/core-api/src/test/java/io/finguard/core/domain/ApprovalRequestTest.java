@@ -35,7 +35,7 @@ class ApprovalRequestTest {
         ApprovalRequest request = open();
         Instant now = OPENED.plusSeconds(60);
 
-        request.approve("EMP-201", "확인함", now, APPROVED_TTL);
+        request.approve("EMP-201", ApprovalDecisionReason.CONFIRMED_BUSINESS_NEED, now, APPROVED_TTL);
 
         assertThat(request.getStatus()).isEqualTo(ApprovalStatus.APPROVED);
         assertThat(request.getDecidedBy()).isEqualTo("EMP-201");
@@ -90,7 +90,7 @@ class ApprovalRequestTest {
     @Test
     void everyTransitionAppendsTheNextEvent() {
         ApprovalRequest request = open();
-        request.approve("EMP-201", "확인함", OPENED.plusSeconds(1), APPROVED_TTL);
+        request.approve("EMP-201", ApprovalDecisionReason.CONFIRMED_BUSINESS_NEED, OPENED.plusSeconds(1), APPROVED_TTL);
         request.expireIfDue(OPENED.plus(Duration.ofHours(1)));
 
         assertThat(request.getEvents())

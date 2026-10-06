@@ -49,9 +49,10 @@ public class ApprovalRequestEvent {
     @Column(name = "actor_id", length = 64)
     private String actorId;
 
-    /** 승인·거절 때 승인자가 남긴 말. 원문 Prompt나 금융 값을 담지 않는다(docs/06 §24). */
-    @Column(name = "note", length = 500)
-    private String note;
+    /** 승인·거절 때 승인자가 고른 사유. 자유 메모는 받지 않는다(ApprovalDecisionReason). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reason", length = 64)
+    private ApprovalDecisionReason reason;
 
     protected ApprovalRequestEvent() {
     }
@@ -63,14 +64,14 @@ public class ApprovalRequestEvent {
             Instant occurredAt,
             ApprovalActorType actorType,
             String actorId,
-            String note) {
+            ApprovalDecisionReason reason) {
         this.approvalRequest = approvalRequest;
         this.sequence = sequence;
         this.eventType = eventType;
         this.occurredAt = occurredAt;
         this.actorType = actorType;
         this.actorId = actorId;
-        this.note = note;
+        this.reason = reason;
     }
 
     public int getSequence() {
@@ -93,7 +94,7 @@ public class ApprovalRequestEvent {
         return actorId;
     }
 
-    public String getNote() {
-        return note;
+    public ApprovalDecisionReason getReason() {
+        return reason;
     }
 }
