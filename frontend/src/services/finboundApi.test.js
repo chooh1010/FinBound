@@ -400,7 +400,7 @@ describe('real Core API adapter', () => {
 
     expect(result.approvalPending).toBe(true)
     expect(result.title).toBe('담당자 확인을 기다리는 조회가 있습니다')
-    expect(result.resultItems).toContain('승인 대기 1건')
+    expect(result.resultItems).toContain('승인 필요 판정 1건')
     expect(result.resultItems).toContain('안전 차단 0건')
     expect(result.resultItems).toContain('정상 확인 0건')
     expect(result.attempts[0].description).toContain('담당자 확인')
@@ -562,5 +562,212 @@ describe('real Core API adapter', () => {
 
   it('uses a dedicated typed error for adapter failures', () => {
     expect(new FinboundApiError('failed')).toBeInstanceOf(Error)
+  })
+})
+
+describe('approval flow', () => {
+  const approvalAttempt = {
+    requestId: 'REQ-APPROVAL',
+    requestedTool: 'CREDIT_SCORE_READ',
+    targetConsumerId: 'CUST-1001',
+    requestedData: ['CREDIT_SCORE'],
+    decision: 'APPROVAL',
+    systemOutcome: 'COMPLETED',
+    reasonCodes: ['BEHAVIOR_ANOMALY'],
+    downstreamReached: false,
+    responseReleased: false,
+  }
+
+  function runReturning(execution) {
+    return vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-A', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-A', status: 'COMPLETED', ...execution }))
+  }
+
+  it('offers a rerun for an approved request that is still valid', async () => {
+    const fetchImpl = runReturning({
+      reasonCodes: ['BEHAVIOR_ANOMALY'],
+      attempts: [approvalAttempt],
+      approvals: [{
+        approvalRequestId: 'APR-1',
+        requestId: 'REQ-APPROVAL',
+        status: 'APPROVED',
+        validUntil: '2999-01-01T00:00:00Z',
+      }],
+    })
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.title).toBe('승인된 조회가 있습니다')
+    expect(result.rerunApproval).toMatchObject({ approvalRequestId: 'APR-1', rerunnable: true })
+    expect(result.attempts[0].description).not.toContain('아직 제공되지 않습니다')
+  })
+
+  it('does not offer a rerun for an approval whose validity has passed', async () => {
+    const fetchImpl = runReturning({
+      reasonCodes: ['BEHAVIOR_ANOMALY'],
+      attempts: [approvalAttempt],
+      approvals: [{ approvalRequestId: 'APR-1', status: 'APPROVED', validUntil: '2000-01-01T00:00:00Z' }],
+    })
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.rerunApproval).toBeNull()
+    // 만료 배치가 돌기 전이라 Core 사유가 없어도 완료로 보이지 않는다.
+    expect(result.title).toBe('승인 기한이 지난 조회가 있습니다')
+  })
+
+  it.each([
+    ['AUDIT_APPROVAL_REJECTED', 'REJECTED', '승인되지 않은 조회가 있습니다'],
+    ['AUDIT_APPROVAL_EXPIRED', 'EXPIRED', '승인 기한이 지난 조회가 있습니다'],
+  ])('does not show %s as a completed run', async (reason, status, title) => {
+    const fetchImpl = runReturning({
+      reasonCodes: [reason, 'BEHAVIOR_ANOMALY'],
+      attempts: [approvalAttempt],
+      approvals: [{ approvalRequestId: 'APR-1', requestId: 'REQ-APPROVAL', status }],
+    })
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.title).toBe(title)
+    expect(result.approvals).toEqual([
+      { approvalRequestId: 'APR-1', requestId: 'REQ-APPROVAL', status, validUntil: null, rerunnable: false },
+    ])
+  })
+
+  it('reruns with the approval id and shows the attempt that used it', async () => {
+    const fetchImpl = runReturning({
+      reasonCodes: [],
+      attempts: [{
+        ...approvalAttempt,
+        decision: 'ALLOW',
+        reasonCodes: [],
+        downstreamReached: true,
+        responseReleased: true,
+        approvalRequestId: 'APR-1',
+      }],
+      approvals: [],
+    })
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN', approvalRequestId: 'APR-1' })
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({
+      employeeId: 'EMP-101',
+      consumerId: 'CUST-1001',
+      taskType: 'LOAN_REVIEW',
+      inputText: '현재 고객의 신규 대출 심사자료 확인',
+      approvalRequestId: 'APR-1',
+    })
+    expect(result.attempts[0].approvalRequestId).toBe('APR-1')
+    expect(result.title).toBe('AI 업무 처리가 완료되었습니다')
+  })
+
+  it('surfaces a refused rerun with its reason code', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({
+      reasonCode: 'APPROVAL_NOT_APPLICABLE',
+      detail: '이 실행에 쓸 수 없는 승인입니다.',
+    }, 409))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN', approvalRequestId: 'APR-OLD' }))
+      .rejects.toMatchObject({ code: 'APPROVAL_NOT_APPLICABLE', status: 409 })
+  })
+
+  it('reads the role and lists, approves and rejects approval requests', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'APPROVER', employeeId: 'EMP-201' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ approvalRequestId: 'APR-1', status: 'PENDING' }] }))
+      .mockResolvedValueOnce(jsonResponse({ approvalRequestId: 'APR-1', status: 'APPROVED' }))
+      .mockResolvedValueOnce(jsonResponse({ approvalRequestId: 'APR-2', status: 'REJECTED' }))
+    configureFinboundApi({ mode: 'real', baseUrl: 'http://core', credential: 'approver', fetchImpl })
+
+    expect(await finboundApi.getMe()).toEqual({ role: 'APPROVER', employeeId: 'EMP-201' })
+    expect((await finboundApi.listApprovals()).items).toHaveLength(1)
+    await finboundApi.approve('APR-1', 'CONFIRMED_BUSINESS_NEED')
+    await finboundApi.reject('APR-2')
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://core/api/v1/me')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://core/api/v1/approval-requests?status=PENDING')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://core/api/v1/approval-requests/APR-1/approve')
+    expect(fetchImpl.mock.calls[2][1].method).toBe('POST')
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body)).toEqual({ reason: 'CONFIRMED_BUSINESS_NEED' })
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://core/api/v1/approval-requests/APR-2/reject')
+    expect(JSON.parse(fetchImpl.mock.calls[3][1].body)).toEqual({})
+  })
+
+  it('does not show the original run as completed after a rerun used its approval', async () => {
+    const fetchImpl = runReturning({
+      reasonCodes: ['BEHAVIOR_ANOMALY'],
+      attempts: [approvalAttempt],
+      approvals: [{ approvalRequestId: 'APR-1', status: 'CONSUMED', validUntil: '2999-01-01T00:00:00Z' }],
+    })
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.title).toBe('승인된 조회는 다시 실행에서 진행했습니다')
+    expect(result.rerunApproval).toBeNull()
+  })
+
+  it('keeps a failure ahead of an approved request and still exposes the rerun', async () => {
+    const fetchImpl = runReturning({
+      reasonCodes: ['BEHAVIOR_ANOMALY'],
+      attempts: [approvalAttempt, { ...approvalAttempt, requestId: 'REQ-ERR', decision: undefined, systemOutcome: 'ERROR' }],
+      approvals: [{ approvalRequestId: 'APR-1', status: 'APPROVED', validUntil: '2999-01-01T00:00:00Z' }],
+    })
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.title).toBe('AI 업무 처리 중 오류가 발생했습니다')
+    expect(result.rerunApproval?.approvalRequestId).toBe('APR-1')
+  })
+
+  it('picks the first approval still valid at the current time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-07T12:00:00Z'))
+    try {
+      const fetchImpl = runReturning({
+        reasonCodes: ['BEHAVIOR_ANOMALY'],
+        attempts: [approvalAttempt],
+        approvals: [
+          // 기한이 지금과 같으면 지난 것이다. Core도 valid_until > now일 때만 받는다.
+          { approvalRequestId: 'APR-EDGE', status: 'APPROVED', validUntil: '2026-10-07T12:00:00Z' },
+          { approvalRequestId: 'APR-NEXT', status: 'APPROVED', validUntil: '2026-10-07T12:00:01Z' },
+          { approvalRequestId: 'APR-LATER', status: 'APPROVED', validUntil: '2026-10-07T13:00:00Z' },
+        ],
+      })
+      configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl, sleepImpl: async () => {} })
+
+      const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+      expect(result.approvals.map((approval) => approval.rerunnable)).toEqual([false, true, true])
+      expect(result.rerunApproval.approvalRequestId).toBe('APR-NEXT')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    [403, 'APPROVAL_SELF_DECISION'],
+    [409, 'APPROVAL_NOT_PENDING'],
+  ])('surfaces a %s %s decision refusal with its reason code', async (status, reasonCode) => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ reasonCode, detail: 'refused' }, status))
+    configureFinboundApi({ mode: 'real', credential: 'approver', fetchImpl })
+
+    await expect(finboundApi.approve('APR-1')).rejects.toMatchObject({ code: reasonCode, status })
+  })
+
+  it('keeps mock mode on the operator screens', async () => {
+    expect(await finboundApi.getMe()).toEqual({ role: 'OPERATOR', employeeId: 'EMP-101' })
+    await expect(finboundApi.approve('APR-1')).rejects.toMatchObject({ code: 'APPROVAL_REQUIRES_CORE_API' })
   })
 })
