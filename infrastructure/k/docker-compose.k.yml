@@ -77,7 +77,8 @@ services:
     restart: unless-stopped
     command: [run, --server, --addr=0.0.0.0:8181, /policy]
     volumes:
-      - ./k/policy-candidate:/policy:ro
+      # 후보 정책 폴더. 기본은 운영 정책 사본(기준선). 재평가 실측에서 CANDIDATE_POLICY_DIR로 바꾼다.
+      - ${CANDIDATE_POLICY_DIR:-./k/policy-candidate}:/policy:ro
     read_only: true
     security_opt:
       - no-new-privileges:true
