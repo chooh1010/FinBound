@@ -160,6 +160,7 @@ public class ContextResolveService {
                 trustedVerifiedAgentId,
                 new ResolvedAuditContext(
                         passport.getEmployeeId(),
+                        passport.getCaseId(),
                         passport.getPassportId(),
                         request.requestedData(),
                         toAuditScopeStatus(scopeStatus),

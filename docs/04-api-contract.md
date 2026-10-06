@@ -804,7 +804,8 @@ Business Audit 생성 실패 시 Gateway는 Downstream을 호출하지 않는다
 `contracts/audit/audit-event.schema.json`이 정의한 필드이고, §9 Behavior History가 그대로 돌려준다.
 BLOCK이나 ERROR로 끝나도 남아야 하므로 Outcome이 아니라 선저장 때 받는다.
 
-**이 셋은 "Agent가 시도한 값"이지 Core가 보증한 값이 아니다.** §1.4에 따라 Body의 식별자는
+**선저장 때 받은 이 셋은 "Agent가 시도한 값"이지 Core가 보증한 값이 아니다.** (`caseId`는 아래처럼 Context
+Resolve 때 해석된 Passport 기준으로 다시 정해진다.) §1.4에 따라 Body의 식별자는
 인증수단이 아니며, 같은 요청의 `verifiedAgentId`가 무시되고 `X-FinGuard-Service-Credential`로
 검증된 신원이 쓰이는 것과 같은 이유다. 이 값으로 권한을 판단하지 않는다 — Scope 비교는
 Financial Context Resolver가, 정책 조합은 OPA가 한다.
@@ -812,6 +813,11 @@ Financial Context Resolver가, 정책 조합은 OPA가 한다.
 > **미결:** 이 셋을 `agentRunId`가 가리키는 AgentRun·Task Passport와 대조해 저장할지는 정하지 않았다.
 > 대조하면 이력 오염을 막지만 선저장 경로에 조회가 하나 늘고, Audit 선저장 실패는 Downstream
 > 미호출로 이어지므로 실패 지점이 하나 늘어난다. 별도 티켓에서 정한다.
+
+**`caseId`는 선저장 때 비어 있을 수 있다.** Gateway는 Passport를 해석하기 전에 감사행을 만들므로 Case를 모른다.
+Core는 Context Resolve(§7)에서 근거를 적을 때 Passport가 가리키는 Case를 `caseId`에 함께 적는다.
+선저장 값이 있는데 해석된 Case와 다르면 근거 기록을 거부한다(`409`, 다른 사건). 비워 두면 §9 Behavior History가
+Case 없는 행을 내보내고 Gateway는 그런 행을 AI에 넘기지 않아 행동 이력이 통째로 사라진다.
 
 ### Outcome 갱신
 

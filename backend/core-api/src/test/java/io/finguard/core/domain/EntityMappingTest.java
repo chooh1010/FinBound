@@ -406,6 +406,7 @@ class EntityMappingTest {
         event.recordResolvedContext(
                 new ResolvedAuditContext(
                         "EMP-900",
+                        "LOAN-2026-900",
                         "PASS-900",
                         EnumSet.of(DataType.CREDIT_SCORE),
                         new AuditScopeStatus(
@@ -473,6 +474,74 @@ class EntityMappingTest {
                                 event.recordResolvedContext(
                                         resolvedContext("PASS-901", new BigDecimal("0.0500"))))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void auditEventTakesTheCaseFromTheResolvedEvidenceWhenTheStartHadNone() {
+        // Gateway는 선저장 때 Case를 모른다. 근거를 적을 때 채우지 않으면 Behavior History가 비어 나간다.
+        AuditEvent event = auditEventWithoutCase("AUD-901", "REQ-901");
+
+        event.recordResolvedContext(resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.0500")));
+        em.persist(event);
+        em.flush();
+        em.clear();
+
+        assertThat(em.find(AuditEvent.class, "AUD-901").getCaseId()).isEqualTo("LOAN-2026-900");
+    }
+
+    @Test
+    void auditEventAcceptsAnIdenticalRetryAfterTheCaseWasFilledAndReloaded() {
+        AuditEvent event = auditEventWithoutCase("AUD-901", "REQ-901");
+        event.recordResolvedContext(resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.0500")));
+        em.persist(event);
+        em.flush();
+        em.clear();
+
+        AuditEvent reloaded = em.find(AuditEvent.class, "AUD-901");
+        reloaded.recordResolvedContext(resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.05")));
+
+        assertThat(reloaded.getCaseId()).isEqualTo("LOAN-2026-900");
+    }
+
+    @Test
+    void auditEventRejectsEvidenceOnALegacyRowThatHasEvidenceButNoCase() {
+        // 이 변경 전에는 근거를 적어도 Case가 비어 있었다. 무엇과 대조할지 모르므로 받지 않는다.
+        AuditEvent legacy = auditEventWithoutCase("AUD-902", "REQ-902");
+        legacy.recordResolvedContext(resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.0500")));
+        org.springframework.test.util.ReflectionTestUtils.setField(legacy, "caseId", null);
+
+        assertThatThrownBy(
+                        () ->
+                                legacy.recordResolvedContext(
+                                        resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.0500"))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(legacy.getCaseId()).isNull();
+    }
+
+    @Test
+    void auditEventRejectsEvidenceForADifferentCase() {
+        AuditEvent event = auditEvent("AUD-900", "REQ-900");
+
+        assertThatThrownBy(
+                        () ->
+                                event.recordResolvedContext(
+                                        resolvedContext("LOAN-2026-901", "PASS-900", new BigDecimal("0.0500"))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(event.getCaseId()).isEqualTo("LOAN-2026-900");
+        assertThat(event.getPassportId()).isNull();
+    }
+
+    @Test
+    void auditEventRejectsARetryThatNamesADifferentCaseAfterTheFirstEvidence() {
+        AuditEvent event = auditEventWithoutCase("AUD-901", "REQ-901");
+        event.recordResolvedContext(resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.0500")));
+
+        assertThatThrownBy(
+                        () ->
+                                event.recordResolvedContext(
+                                        resolvedContext("LOAN-2026-901", "PASS-900", new BigDecimal("0.0500"))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(event.getCaseId()).isEqualTo("LOAN-2026-900");
     }
 
     @Test
@@ -579,8 +648,13 @@ class EntityMappingTest {
     }
 
     private ResolvedAuditContext resolvedContext(String passportId, BigDecimal promptRisk) {
+        return resolvedContext("LOAN-2026-900", passportId, promptRisk);
+    }
+
+    private ResolvedAuditContext resolvedContext(String caseId, String passportId, BigDecimal promptRisk) {
         return new ResolvedAuditContext(
                 "EMP-900",
+                caseId,
                 passportId,
                 EnumSet.of(DataType.CREDIT_SCORE),
                 new AuditScopeStatus(
@@ -607,6 +681,19 @@ class EntityMappingTest {
                 "LOAN-AGENT-01",
                 "RUN-900",
                 "LOAN-2026-900",
+                "CUST-900",
+                Tool.CREDIT_SCORE_READ,
+                ISSUED);
+    }
+
+    private AuditEvent auditEventWithoutCase(String auditEventId, String requestId) {
+        return new AuditEvent(
+                auditEventId,
+                requestId,
+                "trace-901",
+                "LOAN-AGENT-01",
+                "RUN-900",
+                null,
                 "CUST-900",
                 Tool.CREDIT_SCORE_READ,
                 ISSUED);

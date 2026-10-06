@@ -17,6 +17,7 @@ import java.util.Set;
  */
 public record ResolvedAuditContext(
         String employeeId,
+        String caseId,
         String passportId,
         Set<DataType> requestedData,
         AuditScopeStatus scopeStatus,
@@ -27,6 +28,7 @@ public record ResolvedAuditContext(
 
     public ResolvedAuditContext {
         requireText(employeeId, "employeeId");
+        requireText(caseId, "caseId");
         requireText(passportId, "passportId");
         if (requestedData == null || requestedData.isEmpty()) {
             // 스키마의 minItems: 1. FK나 check로는 걸 수 없어 여기서 막는다 —
@@ -62,6 +64,7 @@ public record ResolvedAuditContext(
     public boolean matches(ResolvedAuditContext other) {
         return other != null
                 && employeeId.equals(other.employeeId)
+                && caseId.equals(other.caseId)
                 && passportId.equals(other.passportId)
                 && requestedData.equals(other.requestedData)
                 && scopeStatus.equals(other.scopeStatus)
