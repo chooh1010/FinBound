@@ -2,7 +2,7 @@ package finguard.authorization
 
 import rego.v1
 
-policy_version := "loan-review-policy-2"
+policy_version := "loan-review-policy-3"
 
 scope_status_keys := {
     "employeeAuthority",
@@ -58,9 +58,10 @@ deny_reasons contains "CASE_SCOPE_VIOLATION" if { input.scopeStatus.customerScop
 deny_reasons contains "TOOL_SCOPE_VIOLATION" if { input.scopeStatus.toolScope == "VIOLATION" }
 deny_reasons contains "DATA_SCOPE_VIOLATION" if { input.scopeStatus.dataScope == "VIOLATION" }
 deny_reasons contains "PROMPT_INJECTION" if { input.risk.promptRiskLevel == "CRITICAL" }
-# 행동 CRITICAL만으로는 차단하지 않는다(policy-2). Isolation Forest 점수는 극단에서 포화돼 업무시간
-# 빠른 반복과 야간 누적을 안정적으로 가르지 못한다 — 같은 학습 코드에서도 시드에 따라 빠른 반복의
-# CRITICAL 비율이 0%~62.5%로 흔들렸다. 심각도를 다시 설계할 때까지 행동 신호는 플래그로만 남긴다.
+# 행동 CRITICAL만으로는 차단하지 않는다. Isolation Forest 점수는 극단에서 포화돼 업무시간 빠른 반복과
+# 야간 누적을 안정적으로 가르지 못한다 — 같은 학습 코드에서도 시드에 따라 빠른 반복의 CRITICAL 비율이
+# 0%~62.5%로 흔들렸다. 자동 차단도 그대로 허용도 아닌 사람의 확인으로 보낸다(policy-3, docs/06 §11).
+approval_reasons contains "BEHAVIOR_ANOMALY" if { input.risk.behaviorRiskLevel == "CRITICAL" }
 deny_reasons contains "HARD_REQUEST_LIMIT_EXCEEDED" if { input.limits.hardRequestLimitExceeded }
 
 decision := {
@@ -83,6 +84,20 @@ risk_flagged := false if {
 allow_severity := "HIGH" if { risk_flagged }
 allow_severity := "LOW" if { not risk_flagged }
 
+# 세 판정은 서로 배타적이어야 한다. 겹치면 OPA 평가가 충돌하고 Gateway가 fail-closed한다.
+# 차단 사유가 있으면 BLOCK, 없고 승인 사유가 있으면 APPROVAL, 둘 다 없으면 ALLOW.
+decision := {
+    "decision": "APPROVAL",
+    "severity": "HIGH",
+    "riskFlagged": true,
+    "reasonCodes": sort(approval_reasons),
+    "policyVersion": policy_version,
+} if {
+    valid_input
+    count(deny_reasons) == 0
+    count(approval_reasons) > 0
+}
+
 decision := {
     "decision": "ALLOW",
     "severity": allow_severity,
@@ -92,4 +107,5 @@ decision := {
 } if {
     valid_input
     count(deny_reasons) == 0
+    count(approval_reasons) == 0
 }
