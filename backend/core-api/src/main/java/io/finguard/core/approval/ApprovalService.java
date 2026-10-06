@@ -30,14 +30,17 @@ import io.finguard.core.security.CoreApiPrincipal;
 public class ApprovalService {
 
     private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalEventWriter approvalEvents;
     private final AuditEventRepository auditEvents;
     private final ApprovalProperties properties;
 
     public ApprovalService(
             ApprovalRequestRepository approvalRequests,
+            ApprovalEventWriter approvalEvents,
             AuditEventRepository auditEvents,
             ApprovalProperties properties) {
         this.approvalRequests = approvalRequests;
+        this.approvalEvents = approvalEvents;
         this.auditEvents = auditEvents;
         this.properties = properties;
     }
@@ -81,8 +84,8 @@ public class ApprovalService {
                 case NOT_PENDING, NOT_APPLICABLE -> new ApprovalNotPendingException();
             };
         }
-        // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 그대로 flush한다 — 새 이벤트가 persist로 함께 들어간다.
-        approvalRequests.flush();
+        // 저장과 이번 전이의 이벤트 v2 기록을 한 곳에서 한다(ApprovalEventWriter).
+        approvalEvents.save(request);
         String requestId = auditEvents.findById(request.getAuditEventId()).map(AuditEvent::getRequestId).orElse(null);
         return ApprovalRequestView.of(request, requestId);
     }

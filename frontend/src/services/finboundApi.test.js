@@ -771,3 +771,29 @@ describe('approval flow', () => {
     await expect(finboundApi.approve('APR-1')).rejects.toMatchObject({ code: 'APPROVAL_REQUIRES_CORE_API' })
   })
 })
+
+describe('notification inbox API', () => {
+  it('reads the unread count and the inbox and marks an item read', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ unread: 3 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ notificationId: 1 }] }))
+      .mockResolvedValueOnce({ ok: true, status: 204, text: async () => '' })
+    configureFinboundApi({ mode: 'real', baseUrl: 'http://core', credential: 'operator', fetchImpl })
+
+    expect(await finboundApi.getUnreadNotificationCount()).toBe(3)
+    expect((await finboundApi.listNotifications()).items).toHaveLength(1)
+    await finboundApi.markNotificationRead(1)
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://core/api/v1/notifications/unread-count')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://core/api/v1/notifications?unreadOnly=false')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://core/api/v1/notifications/1/read')
+    expect(fetchImpl.mock.calls[2][1].method).toBe('POST')
+  })
+
+  it('treats a malformed count as zero', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ unread: 'many' }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    expect(await finboundApi.getUnreadNotificationCount()).toBe(0)
+  })
+})

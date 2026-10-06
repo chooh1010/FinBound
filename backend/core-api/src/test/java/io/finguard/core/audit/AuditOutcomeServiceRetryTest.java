@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import io.finguard.core.approval.ApprovalEventWriter;
 import io.finguard.core.approval.ApprovalProperties;
 import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditEvent;
@@ -29,6 +30,7 @@ import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.domain.Severity;
 import io.finguard.core.domain.Tool;
+import io.finguard.core.event.EventRecorder;
 import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.finguard.core.repository.SecuredAgentInputRepository;
@@ -48,13 +50,16 @@ class AuditOutcomeServiceRetryTest {
 
     private final AuditEventRepository repository = mock(AuditEventRepository.class);
     private final ApprovalRequestRepository approvalRequests = mock(ApprovalRequestRepository.class);
+    private final ApprovalEventWriter approvalEvents = mock(ApprovalEventWriter.class);
     private final AuditOutcomeService service =
             new AuditOutcomeService(
                     repository,
                     approvalRequests,
+                    approvalEvents,
                     mock(TaskPassportRepository.class),
                     mock(SecuredAgentInputRepository.class),
                     new ApprovalProperties(Duration.ofMinutes(30), Duration.ofMinutes(15)),
+                    mock(EventRecorder.class),
                     mock(PlatformTransactionManager.class),
                     Clock.fixed(NOW, ZoneOffset.UTC),
                     new SimpleMeterRegistry());
@@ -107,7 +112,7 @@ class AuditOutcomeServiceRetryTest {
 
         service.updateOutcome("REQ-1", approval(), "LOAN-AGENT-01");
 
-        verify(approvalRequests, times(1)).saveAndFlush(any(ApprovalRequest.class));
+        verify(approvalEvents, times(1)).save(any(ApprovalRequest.class));
     }
 
     @Test
@@ -119,7 +124,7 @@ class AuditOutcomeServiceRetryTest {
         assertThatThrownBy(() -> service.updateOutcome("REQ-1", approval(), "LOAN-AGENT-01"))
                 .isInstanceOf(AuditOperationException.class);
 
-        verify(approvalRequests, never()).saveAndFlush(any(ApprovalRequest.class));
+        verify(approvalEvents, never()).save(any(ApprovalRequest.class));
     }
 
     private static AuditOutcomeRequest approval() {

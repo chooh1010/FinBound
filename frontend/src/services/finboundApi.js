@@ -488,6 +488,10 @@ const mockApi = {
   async decideApproval() {
     throw new FinboundApiError('Approval decisions require the Core API', { code: 'APPROVAL_REQUIRES_CORE_API' })
   },
+  // Mock 모드에는 승인 이벤트가 없어 알림도 없다.
+  async getUnreadNotificationCount() { return 0 },
+  async listNotifications() { return { items: [] } },
+  async markNotificationRead() {},
   async getBankWorkCatalog() { return clone(bankWorkCatalogFixture) },
   // Mock 실행 결과는 바뀌지 않는다.
   async refreshAgentExecution(execution) { return clone(execution) },
@@ -551,6 +555,18 @@ const realApi = {
     })
   },
   async getBankWorkCatalog() { return clone(bankWorkCatalogFixture) },
+  // 알림함(docs/04 §18). 직원 신원은 Credential에서 온다 — 요청에 담지 않는다.
+  async getUnreadNotificationCount() {
+    const body = await coreRequest('/api/v1/notifications/unread-count')
+    return Number.isInteger(body?.unread) ? body.unread : 0
+  },
+  async listNotifications({ unreadOnly = false } = {}) {
+    const body = await coreRequest(`/api/v1/notifications?unreadOnly=${unreadOnly ? 'true' : 'false'}`)
+    return { items: Array.isArray(body?.items) ? body.items : [] }
+  },
+  async markNotificationRead(notificationId) {
+    await coreRequest(`/api/v1/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' })
+  },
   // 승인자가 나중에 판단하면 실행 결과(승인 상태)가 바뀐다. 같은 실행을 다시 읽는다.
   async refreshAgentExecution({ agentRun, permission }) {
     const execution = await getAgentExecution(agentRun.agentRunId)
@@ -651,6 +667,9 @@ export const finboundApi = {
   clearCredential() { runtime.credential = null },
   getMe: (...args) => activeApi().getMe(...args),
   listApprovals: (...args) => activeApi().listApprovals(...args),
+  getUnreadNotificationCount: (...args) => activeApi().getUnreadNotificationCount(...args),
+  listNotifications: (...args) => activeApi().listNotifications(...args),
+  markNotificationRead: (...args) => activeApi().markNotificationRead(...args),
   approve: (approvalRequestId, reason) => activeApi().decideApproval(approvalRequestId, 'approve', reason),
   reject: (approvalRequestId, reason) => activeApi().decideApproval(approvalRequestId, 'reject', reason),
   getBankWorkCatalog: (...args) => activeApi().getBankWorkCatalog(...args),

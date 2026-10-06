@@ -1,0 +1,68 @@
+# 이벤트 피드와 경보 워커(docs/04 §18). 선택 overlay다 — 기본 스택은 바꾸지 않는다.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.events.yml up -d
+#
+# 필요한 값(.env): EVENT_FEED_CREDENTIAL(피드 전용 읽기 Credential, 내부 Credential과 달라야 한다),
+# ALERT_WORKER_DB_PASSWORD(워커 데이터베이스 역할). 둘 다 compose secret이라 `compose config`에 값이 나오지 않는다.
+# 컨테이너 안에서는 파일로 받고, Spring이 configtree로 읽는다(/run/finguard-config/<속성 이름>).
+
+secrets:
+  event-feed-credential:
+    environment: EVENT_FEED_CREDENTIAL
+  alert-worker-db-password:
+    environment: ALERT_WORKER_DB_PASSWORD
+
+services:
+  postgres:
+    # 새 볼륨이면 워커 역할·데이터베이스를 만든다. 기존 볼륨은 README대로 한 번 실행한다.
+    secrets:
+      - postgres-password
+      - alert-worker-db-password
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+
+  core-api:
+    environment:
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/finguard-config/
+    secrets:
+      - source: event-feed-credential
+        target: /run/finguard-config/finguard.events.feed.credential
+
+  # 경보 워커. Core 피드만 읽고 자기 데이터베이스(finguard_alerts)에 상태를 둔다.
+  alert-worker:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/spring-service.Dockerfile
+      args:
+        SERVICE_MODULE: alert-worker
+    restart: unless-stopped
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt: [no-new-privileges:true]
+    environment:
+      ALERT_WORKER_DATABASE_URL: jdbc:postgresql://postgres:5432/finguard_alerts
+      ALERT_WORKER_DATABASE_USER: finguard_alerts
+      CORE_FEED_URL: http://core-api:8080
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/finguard-config/
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics
+    secrets:
+      - source: event-feed-credential
+        target: /run/finguard-config/finguard.alert-worker.feed-credential
+      - source: alert-worker-db-password
+        target: /run/finguard-config/spring.datasource.password
+    expose:
+      - "8085"
+    mem_limit: ${ALERT_WORKER_MEM_LIMIT:-512m}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      core-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+    # internal-zone은 Core 피드에, data-zone은 자기 데이터베이스에 닿기 위해서다. public-zone에는 두지 않는다.
+    networks: [internal-zone, data-zone]

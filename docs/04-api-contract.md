@@ -1372,3 +1372,45 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
 다시 보내면, 첫 요청이 실제로는 커밋됐더라도 `200`을 받는다(§11 적용표). 시간 초과는 기록 실패를
 뜻하지 않는다 — Core가 요청을 늦게 처리해 커밋할 수 있다. 결과 기록의 최종 판단 근거는 Core의 감사
 행뿐이고, 끝내 도착하지 않은 결과는 Core의 조정 배치가 `OUTCOME_UNKNOWN`으로 드러낸다(docs/06 §10).
+
+## 18. Event v2 / 내부 이벤트 피드
+
+계약: `contracts/events/finguard-event-v2.schema.json`(fixture `contracts/events/fixtures`). 4b 설계: 감사 결과 확정과
+승인 전이를 **그 변경과 같은 트랜잭션에서** 아웃박스에 한 행씩 남기고, 소비자는 내부 이벤트 피드로 받는다.
+
+- 이벤트 종류: `TOOL_CALL_FINALIZED`, `TOOL_CALL_OUTCOME_UNKNOWN`, `TOOL_CALL_OUTCOME_RESOLVED`(감사 결과 확정),
+  `APPROVAL_REQUESTED`·`_APPROVED`·`_REJECTED`·`_EXPIRED`·`_BOUND`·`_CONSUMED`(승인 이벤트 표의 행마다 하나).
+  재전송·충돌(§11 적용표의 200 재전송, 409)은 이벤트를 만들지 않는다.
+- `occurredAt`은 그 전이의 DB 시각이다. `partitionKey`는 Tool Call이 agentId, 승인이 approvalRequestId다.
+- 원본 Prompt, 금융 응답, 자격 증명, 고객 식별자를 싣지 않는다. 스키마가 닫혀 있어 어느 깊이에도 다른 키가 들어갈 수
+  없다.
+- 전달은 **최소 1회**다. 소비자는 `eventId`로 중복을 걸러야 한다.
+- 스키마는 닫혀 있으므로 타입·필드 추가도 호환 변경이 아니다. 소비자를 먼저 배포하고 생산자를 배포한다. 의미가 바뀌면
+  `schemaVersion`을 올린다.
+
+피드: `GET /feed/v1/events?after={feedSeq}&limit={1..500}` →
+`{"generation": "<uuid>", "events": [{"feedSeq": n, "eventJson": "<원문 문자열>", "eventHash": "<sha256 hex>"}], "nextAfter": n}`.
+
+- `eventJson`은 저장한 문자열 그대로다. 소비자는 그 UTF-8 바이트로 `eventHash`를 다시 계산해 확인한다.
+- 커밋된 뒤 시퀀서가 번호를 매긴 이벤트만 나간다. 늦게 커밋된 이벤트는 더 큰 번호를 받으므로 `after`로 이어 읽으면
+  건너뛰지 않는다. 번호에 빈칸은 생길 수 있다.
+- `generation`이 바뀌면 데이터베이스가 새로 만들어져 번호가 처음부터 다시 시작한 것이다. 소비자는 멈춘다.
+- `after`·`limit`가 범위 밖이면 `400 INVALID_FEED_CURSOR`다.
+- 인증은 **피드 전용 읽기 Credential**(`X-FinGuard-Service-Credential` 헤더, 설정 `finguard.events.feed.credential`)이다.
+  내부 Credential로는 피드를, 피드 Credential로는 `/internal/*`를 부를 수 없다(서로 다른 경로 패턴). 두 값이 같으면
+  Core가 기동하지 않고, 피드 Credential을 두지 않으면 피드는 열리지 않는다.
+
+**승인 알림함** — Core 안 소비자가 승인 이벤트를 받아 만든다(같은 이벤트·같은 수신자로 한 번).
+
+- 승인 요청 → 역할 APPROVER 알림함. 승인·거절·만료 → 요청한 직원(요청 직원이 기록되지 않은 옛 요청이면 없음).
+  묶기·사용은 알리지 않는다.
+- `GET /api/v1/notifications?unreadOnly=false` → `{"items": [{"notificationId", "kind", "approvalRequestId",
+  "createdAt", "read"}]}`. 최신순 최대 50건. `createdAt`은 이벤트의 `occurredAt`이다.
+- `GET /api/v1/notifications/unread-count` → `{"unread": n}`.
+- `POST /api/v1/notifications/{notificationId}/read` → `204`. 이미 읽었어도 `204`. 이 직원에게 보이지 않는 알림이면
+  있든 없든 `404 NOTIFICATION_NOT_FOUND`.
+- OPERATOR는 자기 직원 id의 알림, APPROVER는 역할 알림함과 자기 직원 id의 알림을 본다. VIEWER는 `403`. 직원 신원은
+  언제나 Credential에서 온다. 읽음은 직원별이다 — 한 승인자가 읽어도 다른 승인자에게는 안 읽은 알림이다.
+
+소비자는 Core의 원천 표(감사·승인·아웃박스)를 직접 조회하지 않는다. 자기 상태(처리 기록·체크포인트)를 두는 저장소는
+가질 수 있다.

@@ -1,0 +1,32 @@
+server:
+  port: ${ALERT_WORKER_PORT:8085}
+
+spring:
+  application:
+    name: finguard-alert-worker
+  # 워커 전용 데이터베이스. Core 데이터베이스가 아니다(docs/04 §18).
+  datasource:
+    url: ${ALERT_WORKER_DATABASE_URL:jdbc:postgresql://localhost:5432/finguard_alerts}
+    username: ${ALERT_WORKER_DATABASE_USER:finguard_alerts}
+    password: ${ALERT_WORKER_DATABASE_PASSWORD:}
+
+finguard:
+  alert-worker:
+    feed-url: ${CORE_FEED_URL:http://localhost:8080}
+    # 피드 전용 읽기 Credential. Core의 FINGUARD_EVENT_FEED_CREDENTIAL과 같은 값이다.
+    feed-credential: ${FINGUARD_EVENT_FEED_CREDENTIAL:}
+    poll-interval: ${ALERT_WORKER_POLL_INTERVAL:1s}
+    batch-size: ${ALERT_WORKER_BATCH_SIZE:100}
+    window: ${ALERT_WORKER_WINDOW:60s}
+    block-threshold: ${ALERT_WORKER_BLOCK_THRESHOLD:5}
+    risk-flag-threshold: ${ALERT_WORKER_RISK_FLAG_THRESHOLD:3}
+    integrity-retries: ${ALERT_WORKER_INTEGRITY_RETRIES:5}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never

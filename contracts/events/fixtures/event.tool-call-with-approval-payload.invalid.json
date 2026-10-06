@@ -1,0 +1,19 @@
+{
+  "eventId": "0b0c4a7e-1f3d-4c1a-9a2e-3f5b6c7d8e01",
+  "schemaVersion": 2,
+  "eventType": "TOOL_CALL_FINALIZED",
+  "occurredAt": "2026-10-07T12:00:05.123456Z",
+  "aggregateType": "TOOL_CALL",
+  "aggregateId": "AUD-1",
+  "partitionKey": "LOAN-AGENT-01",
+  "payload": {
+    "approvalRequestId": "APR-1",
+    "auditEventId": "AUD-0",
+    "agentId": "LOAN-AGENT-01",
+    "agentRunId": "RUN-0",
+    "requesterEmployeeId": "EMP-101",
+    "sequence": 4,
+    "actorType": "SYSTEM",
+    "consumedByAuditEventId": "AUD-1"
+  }
+}

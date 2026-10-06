@@ -23,6 +23,7 @@ import io.finguard.core.dashboard.PermissionComparisonNotFoundException;
 import io.finguard.core.dashboard.UnsupportedPeriodException;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.history.InvalidBehaviorHistoryWindowException;
+import io.finguard.core.notification.NotificationNotFoundException;
 import io.finguard.core.permission.PermissionNotIssuableException;
 import io.finguard.core.security.CoreApiAccessDeniedException;
 import io.finguard.core.security.CoreApiCredentialFilter;
@@ -165,6 +166,11 @@ public class CoreApiExceptionHandler {
     @ExceptionHandler(ApprovalNotPendingException.class)
     public ResponseEntity<ProblemDetail> handleApprovalNotPending(ApprovalNotPendingException exception) {
         return problem(HttpStatus.CONFLICT, ReasonCode.APPROVAL_NOT_PENDING.name(), "이미 처리됐거나 기한이 지난 승인 요청입니다.");
+    }
+
+    @ExceptionHandler(NotificationNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handleNotificationNotFound(NotificationNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다.");
     }
 
     @ExceptionHandler(ApprovalNotApplicableException.class)

@@ -19,9 +19,11 @@ import io.finguard.core.repository.ApprovalRequestRepository;
 public class ApprovalBinding {
 
     private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalEventWriter approvalEvents;
 
-    public ApprovalBinding(ApprovalRequestRepository approvalRequests) {
+    public ApprovalBinding(ApprovalRequestRepository approvalRequests, ApprovalEventWriter approvalEvents) {
         this.approvalRequests = approvalRequests;
+        this.approvalEvents = approvalEvents;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -39,7 +41,7 @@ public class ApprovalBinding {
         } catch (ApprovalDecisionException exception) {
             throw new ApprovalNotApplicableException();
         }
-        // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 flush한다(새 이벤트가 persist로 들어간다).
-        approvalRequests.flush();
+        // 저장과 이번 전이의 이벤트 v2 기록을 한 곳에서 한다(ApprovalEventWriter).
+        approvalEvents.save(request);
     }
 }

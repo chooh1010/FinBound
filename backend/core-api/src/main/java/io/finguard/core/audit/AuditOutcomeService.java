@@ -14,6 +14,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import io.finguard.core.approval.ApprovalEventWriter;
 import io.finguard.core.approval.ApprovalProperties;
 import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditCompletion;
@@ -22,6 +23,8 @@ import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.SecuredAgentInput;
 import io.finguard.core.domain.TaskPassport;
 import io.finguard.core.domain.TaskType;
+import io.finguard.core.event.EventRecorder;
+import io.finguard.core.event.EventType;
 import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.finguard.core.repository.SecuredAgentInputRepository;
@@ -58,9 +61,11 @@ public class AuditOutcomeService {
 
     private final AuditEventRepository auditEvents;
     private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalEventWriter approvalEvents;
     private final TaskPassportRepository passports;
     private final SecuredAgentInputRepository securedInputs;
     private final ApprovalProperties approvalProperties;
+    private final EventRecorder events;
     private final TransactionTemplate transaction;
     private final Clock clock;
     private final Counter resolvedCounter;
@@ -69,17 +74,21 @@ public class AuditOutcomeService {
     public AuditOutcomeService(
             AuditEventRepository auditEvents,
             ApprovalRequestRepository approvalRequests,
+            ApprovalEventWriter approvalEvents,
             TaskPassportRepository passports,
             SecuredAgentInputRepository securedInputs,
             ApprovalProperties approvalProperties,
+            EventRecorder events,
             PlatformTransactionManager transactionManager,
             Clock clock,
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
         this.approvalRequests = approvalRequests;
+        this.approvalEvents = approvalEvents;
         this.passports = passports;
         this.securedInputs = securedInputs;
         this.approvalProperties = approvalProperties;
+        this.events = events;
         this.transaction = new TransactionTemplate(transactionManager);
         // 시도마다 독립된 새 트랜잭션이다. 바깥 트랜잭션에 합류하면 재시도가 이미 rollback-only가 된
         // 같은 트랜잭션을 다시 쓰고, 커밋 전에 "커밋 뒤" 지표·경보가 나간다.
@@ -125,11 +134,17 @@ public class AuditOutcomeService {
             switch (event.getStatus()) {
                 case PROCESSING -> {
                     event.complete(completion);
-                    return Applied.of(Kind.COMPLETED, openApprovalIfRequired(auditEvents.saveAndFlush(event)));
+                    AuditEvent completed = auditEvents.saveAndFlush(event);
+                    // 같은 트랜잭션이다. 이벤트 기록이 실패하면 확정도 롤백된다(docs/04 §18).
+                    events.recordToolCall(EventType.TOOL_CALL_FINALIZED, completed);
+                    return Applied.of(Kind.COMPLETED, openApprovalIfRequired(completed));
                 }
                 case OUTCOME_UNKNOWN -> {
                     event.resolveOutcome(completion, clock.instant());
-                    return Applied.of(Kind.RESOLVED, openApprovalIfRequired(auditEvents.saveAndFlush(event)));
+                    AuditEvent resolved = auditEvents.saveAndFlush(event);
+                    // 해소는 RESOLVED 하나만 낸다. FINALIZED를 함께 내면 소비자가 같은 결과를 두 번 센다.
+                    events.recordToolCall(EventType.TOOL_CALL_OUTCOME_RESOLVED, resolved);
+                    return Applied.of(Kind.RESOLVED, openApprovalIfRequired(resolved));
                 }
                 case COMPLETED, ERROR -> {
                     return Applied.of(event.hasSameOutcome(completion) ? Kind.REPEATED : Kind.CONFLICT, event);
@@ -152,7 +167,7 @@ public class AuditOutcomeService {
                     .map(SecuredAgentInput::getInputHash)
                     .orElse(null);
             // 생성 시각과 기한도 DB 시계로 잡는다. 판정이 DB 시계를 쓰므로 둘이 어긋나면 기한이 늘거나 줄어든다.
-            approvalRequests.saveAndFlush(ApprovalRequest.open(
+            approvalEvents.save(ApprovalRequest.open(
                     event, taskType, inputHash, approvalRequests.databaseNow(), approvalProperties.pendingTtl()));
         }
         return event;
