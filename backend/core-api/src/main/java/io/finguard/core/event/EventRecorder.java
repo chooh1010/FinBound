@@ -1,11 +1,7 @@
 package io.finguard.core.event;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -99,7 +95,7 @@ public class EventRecorder {
                 "insert into event_outbox (event_id, event_type, aggregate_type, aggregate_id, partition_key,"
                         + " source_key, event_json, event_hash) values (?, ?, ?, ?, ?, ?, ?, ?)",
                 eventId, type.name(), type.aggregateType().name(), aggregateId, partitionKey, sourceKey,
-                eventJson, sha256(eventJson));
+                eventJson, EventHashes.sha256(eventJson));
     }
 
     /** 스키마의 타입별 필수·금지 필드를 그대로 따른다. 고객 식별자는 싣지 않는다. */
@@ -173,15 +169,6 @@ public class EventRecorder {
             return JSON.writeValueAsString(envelope);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Event could not be serialized", exception);
-        }
-    }
-
-    static String sha256(String eventJson) {
-        try {
-            return HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(eventJson.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
     }
 }

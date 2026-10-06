@@ -181,7 +181,7 @@ class EventFeedTest {
         JsonNode entry = feed("after=0", "test-feed-credential").getBody().get("events").get(0);
 
         assertThat(entry.get("eventJson").asText()).isEqualTo(eventJson);
-        assertThat(EventRecorder.sha256(entry.get("eventJson").asText())).isEqualTo(entry.get("eventHash").asText());
+        assertThat(EventHashes.sha256(entry.get("eventJson").asText())).isEqualTo(entry.get("eventHash").asText());
     }
 
     @Test
@@ -208,7 +208,7 @@ class EventFeedTest {
         String stored = jdbc.queryForObject(
                 "select event_json from event_outbox where feed_seq = ?", String.class, entry.get("feedSeq").asLong());
         assertThat(entry.get("eventJson").asText()).isEqualTo(stored);
-        assertThat(entry.get("eventHash").asText()).isEqualTo(EventRecorder.sha256(stored));
+        assertThat(entry.get("eventHash").asText()).isEqualTo(EventHashes.sha256(stored));
     }
 
     @Test
@@ -286,7 +286,7 @@ class EventFeedTest {
             statement.setString(3, "LOAN-AGENT-01");
             statement.setString(4, sourceKey);
             statement.setString(5, eventJson);
-            statement.setString(6, EventRecorder.sha256(eventJson));
+            statement.setString(6, EventHashes.sha256(eventJson));
             try (var result = statement.executeQuery()) {
                 result.next();
                 return result.getLong(1);

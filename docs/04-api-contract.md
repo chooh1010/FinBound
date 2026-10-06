@@ -1400,5 +1400,17 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
   내부 Credential로는 피드를, 피드 Credential로는 `/internal/*`를 부를 수 없다(서로 다른 경로 패턴). 두 값이 같으면
   Core가 기동하지 않고, 피드 Credential을 두지 않으면 피드는 열리지 않는다.
 
+**승인 알림함** — Core 안 소비자가 승인 이벤트를 받아 만든다(같은 이벤트·같은 수신자로 한 번).
+
+- 승인 요청 → 역할 APPROVER 알림함. 승인·거절·만료 → 요청한 직원(요청 직원이 기록되지 않은 옛 요청이면 없음).
+  묶기·사용은 알리지 않는다.
+- `GET /api/v1/notifications?unreadOnly=false` → `{"items": [{"notificationId", "kind", "approvalRequestId",
+  "createdAt", "read"}]}`. 최신순 최대 50건. `createdAt`은 이벤트의 `occurredAt`이다.
+- `GET /api/v1/notifications/unread-count` → `{"unread": n}`.
+- `POST /api/v1/notifications/{notificationId}/read` → `204`. 이미 읽었어도 `204`. 이 직원에게 보이지 않는 알림이면
+  있든 없든 `404 NOTIFICATION_NOT_FOUND`.
+- OPERATOR는 자기 직원 id의 알림, APPROVER는 역할 알림함과 자기 직원 id의 알림을 본다. VIEWER는 `403`. 직원 신원은
+  언제나 Credential에서 온다. 읽음은 직원별이다 — 한 승인자가 읽어도 다른 승인자에게는 안 읽은 알림이다.
+
 소비자는 Core의 원천 표(감사·승인·아웃박스)를 직접 조회하지 않는다. 자기 상태(처리 기록·체크포인트)를 두는 저장소는
 가질 수 있다.

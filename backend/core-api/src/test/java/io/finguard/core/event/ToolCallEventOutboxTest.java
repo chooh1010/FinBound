@@ -103,7 +103,7 @@ class ToolCallEventOutboxTest {
         assertThat(row.get("partition_key")).isEqualTo(AGENT);
         assertThat(row.get("source_key")).isEqualTo("AUDIT:AUD-ALLOW:FINALIZED");
         String eventJson = (String) row.get("event_json");
-        assertThat(row.get("event_hash")).isEqualTo(EventRecorder.sha256(eventJson));
+        assertThat(row.get("event_hash")).isEqualTo(EventHashes.sha256(eventJson));
         EventContract.assertSatisfiesContract(eventJson);
         JsonNode event = JSON.readTree(eventJson);
         assertThat(event.get("eventId").asText()).isEqualTo(row.get("event_id").toString());

@@ -66,6 +66,11 @@ finguard:
     feed:
       # 피드 전용 읽기 Credential. 비우면 피드를 열지 않는다. 내부 Credential과 같으면 기동하지 않는다.
       credential: ${FINGUARD_EVENT_FEED_CREDENTIAL:}
+    notifications:
+      # 승인 이벤트를 화면 알림함에 넣는 Core 안 소비자. 끄면 알림이 쌓이지 않지만 켜면 피드에서 따라잡는다.
+      enabled: ${EVENTS_NOTIFICATIONS_ENABLED:true}
+      interval: ${EVENTS_NOTIFICATIONS_INTERVAL:1s}
+      batch-size: ${EVENTS_NOTIFICATIONS_BATCH_SIZE:100}
 
 management:
   endpoints:
