@@ -67,6 +67,11 @@ class OutcomeDeliveryFailureTest {
                 new PolicyDecisionResult(PolicyDecision.BLOCK, "CRITICAL", true,
                     List.of("CASE_SCOPE_VIOLATION"), "policy-1"),
                 0.10))),
+        APPROVAL(stack -> when(stack.authorization.decide(any(), any(), any(), any(), any())).thenReturn(
+            new AuthorizationOutcome(
+                new PolicyDecisionResult(PolicyDecision.APPROVAL, "HIGH", true,
+                    List.of("BEHAVIOR_ANOMALY"), "policy-3"),
+                1.0))),
         FAIL_CLOSED(stack -> when(stack.authorization.decide(any(), any(), any(), any(), any()))
             .thenReturn(AuthorizationOutcome.failClosed("POLICY_ENGINE_UNAVAILABLE"))),
         DOWNSTREAM_REACHED_ERROR(stack -> {

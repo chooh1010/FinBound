@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClientException;
 
 import io.finguard.gateway.authorization.AuthorizationContext;
 import io.finguard.gateway.authorization.PolicyDecisionResult;
+import io.finguard.gateway.contract.PolicyDecision;
 import io.finguard.gateway.exception.OpaUnavailableException;
 
 @Component
@@ -35,7 +36,17 @@ public class OpaClient {
             if (response == null || response.result() == null) {
                 throw new OpaUnavailableException("OPA returned empty response");
             }
-            return response.result();
+            PolicyDecisionResult result = response.result();
+            // 판정이 없거나, 실행하지 않는 판정인데 사유가 없으면 계약 밖이다. 그대로 넘기면 Core가 결과 기록을
+            // 400으로 거절해 감사 결과가 사라진다 — 판정 전에 fail-closed한다.
+            if (result.decision() == null) {
+                throw new OpaUnavailableException("OPA returned no decision");
+            }
+            if (result.decision() != PolicyDecision.ALLOW
+                    && (result.reasonCodes() == null || result.reasonCodes().isEmpty())) {
+                throw new OpaUnavailableException("OPA returned a non-ALLOW decision without reasons");
+            }
+            return result;
         } catch (RestClientException e) {
             throw new OpaUnavailableException("OPA call failed", e);
         }

@@ -114,6 +114,46 @@ class ToolCallIntegrationTest {
     }
 
     @Test
+    void approvalFromOpaAnswers202WithoutAResult() throws Exception {
+        opaMock.stubFor(WireMock.post(WireMock.urlEqualTo("/v1/data/finguard/authorization/decision"))
+            .willReturn(WireMock.aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {
+                      "result": {
+                        "decision": "APPROVAL",
+                        "severity": "HIGH",
+                        "riskFlagged": true,
+                        "reasonCodes": ["BEHAVIOR_ANOMALY"],
+                        "policyVersion": "loan-review-policy-3"
+                      }
+                    }
+                    """)));
+
+        mockMvc.perform(post("/gateway/v1/tool-calls")
+                .header("Authorization", "Bearer valid-agent-token")
+                .header("X-Request-Id", "550e8400-e29b-41d4-a716-446655440001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "agentRunId": "RUN-001",
+                      "passportId": "PASS-001",
+                      "tool": "CREDIT_SCORE_READ",
+                      "targetConsumerId": "CUST-1001",
+                      "requestedData": ["CREDIT_SCORE"],
+                      "action": "READ"
+                    }
+                    """))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.requestId").value("550e8400-e29b-41d4-a716-446655440001"))
+            .andExpect(jsonPath("$.decision").value("APPROVAL"))
+            .andExpect(jsonPath("$.reasonCodes[0]").value("BEHAVIOR_ANOMALY"))
+            .andExpect(jsonPath("$.result").doesNotExist())
+            .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
+    @Test
     void missingCredentialReturns401() throws Exception {
         mockMvc.perform(post("/gateway/v1/tool-calls")
                 .contentType(MediaType.APPLICATION_JSON)
