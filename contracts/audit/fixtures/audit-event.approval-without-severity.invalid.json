@@ -1,0 +1,43 @@
+{
+  "auditEventId": "AUD-004",
+  "requestId": "REQ-004",
+  "traceId": "4bf92f0000000004",
+  "agentId": "LOAN-AGENT-01",
+  "agentRunId": "RUN-004",
+  "caseId": "LOAN-2026-001",
+  "targetConsumerId": "CUST-1001",
+  "requestedTool": "CREDIT_SCORE_READ",
+  "requestedData": [
+    "CREDIT_SCORE"
+  ],
+  "scopeStatus": {
+    "employeeAuthority": "OK",
+    "permissionTemplate": "OK",
+    "caseStatus": "OK",
+    "mandate": "OK",
+    "passportStatus": "OK",
+    "agentBinding": "OK",
+    "customerScope": "OK",
+    "toolScope": "OK",
+    "dataScope": "OK"
+  },
+  "promptRiskEvaluationStatus": "EVALUATED",
+  "promptRisk": 0.05,
+  "promptRiskLevel": "LOW",
+  "promptModelVersion": "prompt-guard-6",
+  "behaviorRisk": 1.0,
+  "behaviorRiskLevel": "CRITICAL",
+  "behaviorFeatureVersion": "behavior-features-2",
+  "behaviorModelVersion": "iforest-2",
+  "decision": "APPROVAL",
+  "reasonCodes": [
+    "BEHAVIOR_ANOMALY"
+  ],
+  "policyVersion": "loan-review-policy-3",
+  "systemOutcome": "COMPLETED",
+  "downstreamReached": false,
+  "responseReleased": false,
+  "status": "COMPLETED",
+  "requestedAt": "2026-08-17T21:33:10+09:00",
+  "completedAt": "2026-08-17T21:33:11+09:00"
+}

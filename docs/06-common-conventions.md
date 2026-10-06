@@ -174,9 +174,14 @@ BLOCK
 P1:
 
 ```text
-MASK
-APPROVAL
+APPROVAL   (구현: loan-review-policy-3)
+MASK       (미구현 — 응답 속 민감정보 검사 단계에서)
 ```
+
+`APPROVAL`은 "실행하지 않고 사람의 확인을 기다린다"는 판정이다. BLOCK처럼 Tool을 실행하지 않으므로 감사 행은
+`COMPLETED`로 한 번 확정되고 실행 측정값이 없다. 승인 여부는 감사 행이 아니라 별도 승인 요청
+(`approval_requests`, 상태 `PENDING`)이 가진다 — 확정된 감사 기록은 다시 쓰지 않는다(§10).
+승인·거절·만료와 승인 후 재개는 아직 없다.
 
 시스템 장애는 Decision Enum에 `ERROR`를 추가하지 않고 Audit/System Outcome으로 표현한다.
 
@@ -278,6 +283,9 @@ CRITICAL
 > 포화돼 업무시간 빠른 반복과 야간 누적을 안정적으로 가르지 못한다(같은 학습 코드에서 시드에 따라 빠른 반복의
 > CRITICAL 비율이 0%~62.5%). 심각도를 다시 설계할 때까지 행동 CRITICAL은 ALERT처럼 `riskFlagged=true`로
 > 허용하고, `BEHAVIOR_ANOMALY`는 예약 코드로 둔다. 근거: `ai-risk/models/behavior_iforest_model_card.md`.
+>
+> **`loan-review-policy-3`에서는 행동 CRITICAL(다른 차단 사유 없음)이 `APPROVAL`이 된다**(§11). 자동 차단도
+> 그대로 허용도 아닌 사람의 확인이다. 사유 코드는 `BEHAVIOR_ANOMALY`.
 
 ---
 
@@ -388,6 +396,7 @@ UNKNOWN_PROMPT_ATTACK
 | `POLICY_DECISION_INVALID` | OPA 응답 형식 오류 |
 | `AUDIT_WRITE_FAILED` | Business Audit 저장 실패 |
 | `AUDIT_OUTCOME_UNKNOWN` | 결과 기록이 도착하지 않아 실행 결과를 확인할 수 없음 (AgentRun 실행 조회에 표시) |
+| `AUDIT_APPROVAL_PENDING` | 승인을 기다리는 시도가 있음 (AgentRun 실행 조회에 표시, 승인 요청이 `PENDING`일 때 Core가 파생) |
 | `SECURITY_EVENT_WRITE_FAILED` | SecurityAuthEvent 저장 실패 |
 | `DOWNSTREAM_ERROR` | Mock Financial API 처리 오류 |
 | `DOWNSTREAM_TIMEOUT` | Mock Financial API Timeout |
@@ -524,7 +533,8 @@ Prompt Risk는 Runtime마다 새로 계산되는 행동 점수가 아니라 **�
 
 - Vue Dashboard는 Spring Read-only API만 호출한다.
 - PostgreSQL 직접 연결을 금지한다.
-- 전체 활동은 `ALLOW / BLOCK / ERROR`를 모두 포함한다.
+- 전체 활동은 `ALLOW / BLOCK / APPROVAL / ERROR`를 모두 포함한다. `APPROVAL`은 "승인 필요"로 표시하고 별도 수
+  (`approval`)로 집계한다.
 - `OUTCOME_UNKNOWN`은 판정이 없으므로 `ALLOW / BLOCK / ERROR` 어디에도 넣지 않고 별도 수
   (`outcomeUnknown`)로 집계한다. 목록에는 "결과 미확인" 배지로, 상세에는 탐지 시각(해소됐다면
   해소 시각도)으로 표시한다. 숨기지 않는다.
@@ -561,7 +571,7 @@ Prompt Risk는 Runtime마다 새로 계산되는 행동 점수가 아니라 **�
 
 ```text
 "이 Scope 상태와 AI Risk를 종합했을 때 실행할 것인가?"
-→ ALLOW / BLOCK
+→ ALLOW / BLOCK / APPROVAL(사람 확인 후)
 ```
 
 Spring이 Scope Status를 계산한 뒤 OPA가 동일 비교를 반복하지 않는다.

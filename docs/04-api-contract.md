@@ -206,6 +206,9 @@ Viewer는 Dashboard와 같은 읽기 전용 범위에서 전체 실행을 조회
 - `OUTCOME_UNKNOWN` AuditEvent도 결과가 없으므로 `attempts`에 싣지 않는다. 대신 실행의
   `reasonCodes`에 `AUDIT_OUTCOME_UNKNOWN`을 넣어, 시도가 0건인 "완료"로 보이지 않게 한다.
   결과가 늦게 도착해 확정되면 그 시도는 `attempts`에 나타나고 이 코드는 빠진다.
+- `decision=APPROVAL` 시도는 `systemOutcome=COMPLETED`, `downstreamReached=false`, `responseReleased=false`로
+  `attempts`에 싣는다(실행하지 않았으므로 측정값 없음). 그 승인 요청이 아직 `PENDING`이면 실행의 `reasonCodes`에
+  `AUDIT_APPROVAL_PENDING`을 넣는다 — Agent 실행 자체는 끝났어도(`COMPLETED`) 업무가 끝난 것은 아니다.
 - 정책 판정 전 시스템 오류는 `systemOutcome=ERROR`이고 `decision`을 생략할 수 있다.
 - Downstream 오류는 `decision=ALLOW`, `systemOutcome=ERROR`가 될 수 있다.
 - 응답은 식별자·권한 증거·판정·시각만 포함한다. 원본 Prompt, 금융 문서, 금융 응답,
@@ -516,6 +519,31 @@ documentText
 }
 ```
 
+### APPROVAL Response
+
+정책이 사람의 확인을 요구했다(`loan-review-policy-3`: 행동 위험 CRITICAL이고 다른 차단 사유가 없을 때).
+Gateway는 Tool을 실행하지 않는다. Core는 감사 결과를 적용하는 트랜잭션에서 승인 요청(`PENDING`)을 만든다.
+승인·거절·만료와 승인 후 재개는 아직 없다 — 이 응답은 자동 재개를 약속하지 않는다. `requestId`가 조회 기준이다.
+
+```json
+{
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "decision": "APPROVAL",
+  "reasonCodes": ["BEHAVIOR_ANOMALY"]
+}
+```
+
+### HTTP 상태
+
+| 결과 | HTTP |
+|---|---|
+| `ALLOW` + 실행 성공 | `200` |
+| `BLOCK` | `403` |
+| `APPROVAL` | `202` |
+| 시스템 오류(판정 전 fail-closed, `ALLOW` 뒤 Downstream 오류·시간 초과) | 기존 오류 응답(예: Downstream 오류 `502`, 시간 초과 `504`) |
+
+같은 `requestId` 재시도에는 Gateway가 10분 동안 같은 응답을 돌려준다(Gateway 프로세스가 살아 있는 동안만).
+
 ---
 
 ## 6. 인증 및 Security Event
@@ -709,6 +737,9 @@ GET /internal/v1/agents/{agentId}/behavior-history?window=5m
 ```
 
 `completedEvents`에는 판정이 끝난 행만 싣는다: `COMPLETED`(ALLOW·BLOCK)와, 허용된 뒤 실행에서 실패한 `ERROR`+`ALLOW`.
+`APPROVAL` 행은 싣지 않는다 — 행동 Feature(`docs/03-ai-spec.md` §8)는 ALLOW·BLOCK만 정의하고, 승인 대기가 다음 판정의
+입력이 되면 "사람 확인을 요구했다"는 사실이 다시 위험 신호로 쌓인다. 승인 대기 반복을 행동 신호로 쓸지는 행동 심각도
+재설계 때 정한다.
 판정 전 오류(`decision` 없음), `PROCESSING`, `OUTCOME_UNKNOWN`은 결과를 모르므로 싣지 않는다.
 
 | 행 | `decision` | `success` | `latencyMs` |
@@ -869,7 +900,7 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 |---|---|
 | `systemOutcome = ERROR` | `errorLocation` 필수, `success = false`, `reasonCodes` 비어 있지 않음 |
 | `decision = ALLOW` + `systemOutcome = COMPLETED` | `success = true` |
-| `decision = BLOCK` | `downstreamReached = false`, `responseReleased = false` |
+| `decision = BLOCK \| APPROVAL` | `downstreamReached = false`, `responseReleased = false`, 실행 측정값 없음, `reasonCodes` 비어 있지 않음 |
 
 `errorLocation`은 `^[A-Z][A-Z0-9_]*$` 형식이다.
 
@@ -905,6 +936,11 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 | 같은 결과로 이미 확정 | 같은 결과 | `200` | 멱등 성공. 아무것도 바꾸지 않는다 |
 | 다른 결과로 이미 확정 | 다른 결과 | `409 DUPLICATE_REQUEST` | 저장하지 않고 경보 로그·`audit.outcome.conflict` 지표를 남긴다 |
 | 행 없음 / 검증된 Agent와 행의 Agent 불일치 | — | `404` | 존재 여부를 더 설명하지 않는다 |
+
+`decision=APPROVAL` 결과가 `PROCESSING` 확정이나 `OUTCOME_UNKNOWN` 해소로 **처음 적용될 때만** Core가 같은 트랜잭션에서
+승인 요청(`PENDING`)과 첫 이벤트(`REQUESTED`)를 만든다. 멱등 재전송과 `409`에서는 만들지 않는다(감사 행당 최대 1건).
+결과 기록 자체가 실패하면 승인 요청도 없다 — Gateway는 이미 `202`를 응답했으므로, 이 경우는 F1과 같이 조정 배치가
+`OUTCOME_UNKNOWN`으로 드러낸다(자동 복구는 없다).
 
 Gateway는 결과 기록 응답을 사용자 응답에 반영하지 않고 지표로만 드러낸다: `409` → `audit.outcome.delivery.conflict`,
 `400` → `audit.outcome.delivery.rejected`(계약 불일치, 다시 보내도 거절됨), 그 밖의 4xx·5xx·시간 초과·연결 오류 →
@@ -991,6 +1027,11 @@ POST /v1/data/finguard/authorization/decision
   }
 }
 ```
+
+`decision`은 `ALLOW | BLOCK | APPROVAL` 중 정확히 하나다. 차단 사유가 하나라도 있으면 `BLOCK`, 없고 승인 사유
+(`loan-review-policy-3`: 행동 위험 CRITICAL)가 있으면 `APPROVAL`(`severity=HIGH`, `riskFlagged=true`,
+`reasonCodes=["BEHAVIOR_ANOMALY"]`), 둘 다 없으면 `ALLOW`. 세 규칙은 서로 배타적이다 — 겹치면 OPA 평가가 충돌해
+Gateway가 `POLICY_ENGINE_UNAVAILABLE`로 fail-closed한다.
 
 Rego는 raw Case/Customer/Tool/Data 비교를 하지 않는다.
 
@@ -1194,7 +1235,7 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 
 Vue는 PostgreSQL을 직접 조회하지 않는다.
 
-`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `error`, `outcomeUnknown`을 반환한다.
+`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `approval`, `error`, `outcomeUnknown`을 반환한다.
 `total`은 나머지의 합과 같지 않을 수 있다 — 진행 중인 `PROCESSING`은 `total`에만 들어간다.
 `outcomeUnknown`은 판정이 없으므로 `allow`·`block`에 넣지 않는다.
 

@@ -63,6 +63,11 @@ class AuditRuntimeContractTest {
                 "execution-outcome.block.valid.json"
             ),
             Arguments.of(
+                "APPROVAL은 실행하지 않고 승인을 기다림",
+                "execution-outcome.schema.json",
+                "execution-outcome.approval.valid.json"
+            ),
+            Arguments.of(
                 "시스템 장애는 Decision이 아닌 ERROR Outcome",
                 "execution-outcome.schema.json",
                 "execution-outcome.error.valid.json"
@@ -96,6 +101,11 @@ class AuditRuntimeContractTest {
                 "BLOCK Business Audit도 COMPLETED 상태",
                 "audit-event.schema.json",
                 "audit-event.block.valid.json"
+            ),
+            Arguments.of(
+                "APPROVAL 감사 행은 실행 측정값 없이 확정",
+                "audit-event.schema.json",
+                "audit-event.approval.valid.json"
             ),
             Arguments.of(
                 "Core 장애는 ERROR Business Audit으로 완료",
@@ -138,6 +148,11 @@ class AuditRuntimeContractTest {
                 "execution-outcome.block-reached-downstream.invalid.json"
             ),
             Arguments.of(
+                "APPROVAL인데 Downstream에 도달하고 측정값을 보냄",
+                "execution-outcome.schema.json",
+                "execution-outcome.approval-reached-downstream.invalid.json"
+            ),
+            Arguments.of(
                 "BLOCK ExecutionOutcome의 success 차단",
                 "execution-outcome.schema.json",
                 "execution-outcome.block-execution-values.invalid.json"
@@ -171,6 +186,16 @@ class AuditRuntimeContractTest {
                 "BLOCK Business Audit의 실행 측정값 차단",
                 "audit-event.schema.json",
                 "audit-event.block-execution-values.invalid.json"
+            ),
+            Arguments.of(
+                "APPROVAL 감사 행에 실행 측정값",
+                "audit-event.schema.json",
+                "audit-event.approval-execution-values.invalid.json"
+            ),
+            Arguments.of(
+                "판정이 있는 감사 행에 Severity·Risk Flag가 없음",
+                "audit-event.schema.json",
+                "audit-event.approval-without-severity.invalid.json"
             ),
             Arguments.of(
                 "OUTCOME_UNKNOWN에 지어낸 판정·도달 여부 차단",

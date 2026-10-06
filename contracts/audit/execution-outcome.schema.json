@@ -16,7 +16,7 @@
     "requestId": { "$ref": "#/$defs/nonEmptyIdentifier" },
     "decision": {
       "type": "string",
-      "enum": ["ALLOW", "BLOCK"]
+      "enum": ["ALLOW", "BLOCK", "APPROVAL"]
     },
     "systemOutcome": {
       "type": "string",
@@ -86,8 +86,9 @@
       }
     },
     {
+      "$comment": "BLOCK and APPROVAL never ran the tool: no downstream, no response, no execution measurements.",
       "if": {
-        "properties": { "decision": { "const": "BLOCK" } },
+        "properties": { "decision": { "enum": ["BLOCK", "APPROVAL"] } },
         "required": ["decision"]
       },
       "then": {
