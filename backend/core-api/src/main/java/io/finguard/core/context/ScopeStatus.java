@@ -11,4 +11,19 @@ public record ScopeStatus(
         ScopeState customerScope,
         ScopeState toolScope,
         ScopeState dataScope) {
+
+    /** 하나라도 VIOLATION이면 참이다. 정책은 이 호출을 막는다. */
+    public boolean hasViolation() {
+        return java.util.stream.Stream.of(
+                        employeeAuthority,
+                        permissionTemplate,
+                        caseStatus,
+                        mandate,
+                        passportStatus,
+                        agentBinding,
+                        customerScope,
+                        toolScope,
+                        dataScope)
+                .anyMatch(state -> state == ScopeState.VIOLATION);
+    }
 }

@@ -732,6 +732,93 @@ class AuditPersistenceApiTest {
                 .isNull();
     }
 
+    /** 승인을 쓰지 않은 호출에 "승인을 썼다"는 판정 입력이 오면 기록이 어긋나므로 거부한다. */
+    @Test
+    void rejectsAGrantedApprovalCoreDidNotUse() {
+        assertOutcomeRejected(
+                """
+                {
+                  "decision": "ALLOW", "systemOutcome": "COMPLETED", "reasonCodes": [],
+                  "downstreamReached": true, "responseReleased": true, "success": true,
+                  "severity": "HIGH", "riskFlagged": true, "completedAt": "%s",
+                  "policyInput": {"behaviorRiskLevel": "CRITICAL", "behaviorAnomalyDetected": true,
+                                  "hardRequestLimitExceeded": false, "approvalGranted": true}
+                }
+                """);
+    }
+
+    /**
+     * resolve 때 승인을 쓴 행. 판정 입력도 승인을 썼다고 해야 기록되고, 생략(=false)한 재전송은 충돌이다.
+     * 승인을 썼다는 사실은 감사 행의 approval_request_id에서 온다.
+     */
+    @Test
+    void anOutcomeOnARowThatUsedAnApprovalMustSayItWasGranted() {
+        String used = requestId();
+        createAudit(used, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+        jdbcTemplate.update("update audit_events set approval_request_id = 'APR-1' where request_id = ?", used);
+        String granted = """
+                {
+                  "decision": "ALLOW", "systemOutcome": "COMPLETED", "reasonCodes": [],
+                  "downstreamReached": true, "responseReleased": true, "success": true,
+                  "severity": "HIGH", "riskFlagged": true, "completedAt": "%s",
+                  "policyInput": {"behaviorRiskLevel": "CRITICAL", "behaviorAnomalyDetected": true,
+                                  "hardRequestLimitExceeded": false GRANTED}
+                }
+                """;
+        String notSaid = requestId();
+        createAudit(notSaid, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+        jdbcTemplate.update("update audit_events set approval_request_id = 'APR-2' where request_id = ?", notSaid);
+
+        String grantedTrue = granted.replace("GRANTED", ", \"approvalGranted\": true");
+        ResponseEntity<JsonNode> recorded =
+                updateOutcome(used, "LOAN-AGENT-01", grantedTrue.formatted(COMPLETED_AT));
+        ResponseEntity<JsonNode> resentWithout = updateOutcome(
+                used, "LOAN-AGENT-01", granted.replace("GRANTED", "").formatted(COMPLETED_AT));
+        ResponseEntity<JsonNode> omitted = updateOutcome(
+                notSaid, "LOAN-AGENT-01", granted.replace("GRANTED", "").formatted(COMPLETED_AT));
+
+        assertThat(recorded.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(resentWithout.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(omitted.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(auditStatus(notSaid)).isEqualTo("PROCESSING");
+    }
+
+    /** 승인을 쓴 뒤 판정 전에 실패했으면 판정 입력이 없다. 지어내지 않은 그 결과는 그대로 기록되고 승인 연결은 남는다. */
+    @Test
+    void aPrePolicyFailureAfterUsingAnApprovalIsRecordedWithTheApprovalKept() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+        jdbcTemplate.update("update audit_events set approval_request_id = 'APR-1' where request_id = ?", requestId);
+
+        ResponseEntity<JsonNode> response = updateOutcome(requestId, "LOAN-AGENT-01", """
+                {
+                  "systemOutcome": "ERROR", "reasonCodes": ["POLICY_ENGINE_UNAVAILABLE"],
+                  "downstreamReached": false, "responseReleased": false, "success": false,
+                  "errorLocation": "OPA", "completedAt": "%s"
+                }
+                """.formatted(COMPLETED_AT));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbcTemplate.queryForObject(
+                        "select status || ':' || approval_request_id from audit_events where request_id = ?",
+                        String.class, requestId))
+                .isEqualTo("ERROR:APR-1");
+    }
+
+    @Test
+    void rejectsAnExplicitNullApprovalGranted() {
+        assertOutcomeRejected(
+                """
+                {
+                  "decision": "ALLOW", "systemOutcome": "COMPLETED", "reasonCodes": [],
+                  "downstreamReached": true, "responseReleased": true, "success": true,
+                  "severity": "LOW", "riskFlagged": false, "completedAt": "%s",
+                  "policyInput": {"behaviorRiskLevel": "LOW", "behaviorAnomalyDetected": false,
+                                  "hardRequestLimitExceeded": false, "approvalGranted": null}
+                }
+                """);
+    }
+
     /** 판정 입력이 저장된 행에 판정 입력 없는 결과가 오면 충돌이다 — 저장된 근거를 지우는 것과 같다. */
     @Test
     void resendWithoutPolicyInputConflictsWithARowThatHasIt() {

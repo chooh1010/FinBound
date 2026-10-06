@@ -1,7 +1,10 @@
 package io.finguard.gateway.client;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,7 +31,7 @@ class OpaClientTest {
 
     // 내용은 이 테스트와 무관하다. OPA 응답 해석만 본다.
     private static final AuthorizationContext CONTEXT =
-        new AuthorizationContext("REQ-1", null, null, null);
+        new AuthorizationContext("REQ-1", null, null, null, null);
 
     private WireMockServer server;
     private OpaClient client;
@@ -60,6 +63,21 @@ class OpaClientTest {
 
         assertThat(result.decision()).isEqualTo(PolicyDecision.APPROVAL);
         assertThat(result.reasonCodes()).containsExactly("BEHAVIOR_ANOMALY");
+    }
+
+    /** 정책은 {@code input.approval.granted}를 읽는다(policy-4). 객체가 아니라 실제로 나가는 JSON을 본다. */
+    @Test
+    void sendsTheApprovalAsInputApprovalGranted() {
+        stub("""
+            {"result": {"decision": "ALLOW", "severity": "LOW", "riskFlagged": false,
+                        "reasonCodes": [], "policyVersion": "loan-review-policy-4"}}
+            """);
+
+        client.decide(new AuthorizationContext(
+            "REQ-2", null, null, null, new AuthorizationContext.ApprovalInput(true)));
+
+        server.verify(postRequestedFor(urlEqualTo("/v1/data/finguard/authorization/decision"))
+            .withRequestBody(matchingJsonPath("$.input.approval.granted", equalTo("true"))));
     }
 
     @ParameterizedTest

@@ -310,6 +310,8 @@ BEHAVIOR_ANOMALY
 APPROVAL (loan-review-policy-3, HTTP 202)
 Downstream 0회
 승인 요청 PENDING
+승인 → 다시 실행 → ALLOW (loan-review-policy-4), 승인 CONSUMED
+같은 승인으로 또 실행 → 409 APPROVAL_NOT_APPLICABLE
 ```
 
 Rule Only 비교 시 ALLOW, FinGuard + AI에서 BLOCK되는 인과관계를 보여준다.

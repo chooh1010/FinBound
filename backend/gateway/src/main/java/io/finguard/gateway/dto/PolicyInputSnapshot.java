@@ -10,17 +10,22 @@ import io.finguard.gateway.authorization.AuthorizationContext;
  * 정책 판정에 닿은 경우에만 만든다 — fail-closed에는 판정 입력이 없다(지어내지 않는다).
  *
  * <p>{@code behaviorAnomalyDetected}는 현재 정책이 읽지 않는다. 기록만 하고 판정에 영향을 줬다고 보지 않는다.
+ *
+ * <p>{@code approvalGranted}는 Core가 Context Resolve에서 승인을 썼는지다. Core도 감사 행으로 알고 있으므로, Core는
+ * 기록하지 않고 자기 사실과 같은지만 확인한다(docs/04 §11).
  */
 public record PolicyInputSnapshot(
     String behaviorRiskLevel,
     boolean behaviorAnomalyDetected,
-    boolean hardRequestLimitExceeded
+    boolean hardRequestLimitExceeded,
+    boolean approvalGranted
 ) {
 
     public static PolicyInputSnapshot from(AuthorizationContext context) {
         return new PolicyInputSnapshot(
             context.risk().behaviorRiskLevel(),
             context.risk().behaviorAnomalyDetected(),
-            context.limits().hardRequestLimitExceeded());
+            context.limits().hardRequestLimitExceeded(),
+            context.approval().granted());
     }
 }

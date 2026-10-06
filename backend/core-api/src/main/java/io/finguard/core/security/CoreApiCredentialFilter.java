@@ -52,13 +52,19 @@ public class CoreApiCredentialFilter extends OncePerRequestFilter {
 
     private final byte[] viewerDigest;
     private final byte[] operatorDigest;
+    private final byte[] approverDigest;
     private final String operatorEmployeeId;
+    private final String approverEmployeeId;
     private final CoreApiAuthEventRecorder recorder;
 
     public CoreApiCredentialFilter(CoreApiProperties properties, CoreApiAuthEventRecorder recorder) {
         this.viewerDigest = sha256(properties.viewerCredential());
         this.operatorDigest = sha256(properties.operatorCredential());
         this.operatorEmployeeId = properties.operatorEmployeeId();
+        // 승인자가 없어도 같은 비교를 한다. 아무 Credential과도 맞지 않는 무작위 값을 두어 분기를 만들지 않는다.
+        this.approverDigest =
+                properties.approverConfigured() ? sha256(properties.approverCredential()) : randomDigest();
+        this.approverEmployeeId = properties.approverConfigured() ? properties.approverEmployeeId() : null;
         this.recorder = recorder;
     }
 
@@ -99,14 +105,18 @@ public class CoreApiCredentialFilter extends OncePerRequestFilter {
             return null;
         }
 
-        // 두 Credential을 조건 분기 없이 모두 비교한다. if/else로 짜면 어느 쪽에서 걸렸는지가
+        // 세 Credential을 조건 분기 없이 모두 비교한다. if/else로 짜면 어느 쪽에서 걸렸는지가
         // 응답 시간으로 새어나간다. 비교 대상은 길이가 고정된 SHA-256 다이제스트라 길이 자체도 신호가 되지 않는다.
         byte[] presentedDigest = sha256(presented);
         boolean isViewer = MessageDigest.isEqual(viewerDigest, presentedDigest);
         boolean isOperator = MessageDigest.isEqual(operatorDigest, presentedDigest);
+        boolean isApprover = MessageDigest.isEqual(approverDigest, presentedDigest);
 
         if (isOperator) {
             return new CoreApiPrincipal(CoreApiRole.OPERATOR, operatorEmployeeId);
+        }
+        if (isApprover && approverEmployeeId != null) {
+            return new CoreApiPrincipal(CoreApiRole.APPROVER, approverEmployeeId);
         }
         if (isViewer) {
             return new CoreApiPrincipal(CoreApiRole.VIEWER, null);
@@ -164,5 +174,11 @@ public class CoreApiCredentialFilter extends OncePerRequestFilter {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is required to compare credentials", exception);
         }
+    }
+
+    private static byte[] randomDigest() {
+        byte[] digest = new byte[32];
+        new java.security.SecureRandom().nextBytes(digest);
+        return digest;
     }
 }

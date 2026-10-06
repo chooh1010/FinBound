@@ -20,7 +20,39 @@ import jakarta.validation.constraints.NotBlank;
 public record CoreApiProperties(
         @NotBlank String viewerCredential,
         @NotBlank String operatorCredential,
-        @NotBlank String operatorEmployeeId) {
+        @NotBlank String operatorEmployeeId,
+        String approverCredential,
+        String approverEmployeeId) {
+
+    /**
+     * 승인자는 선택이다. Credential과 직원 ID가 둘 다 있을 때만 APPROVER 역할이 생긴다(docs/04 §2).
+     */
+    public boolean approverConfigured() {
+        return hasText(approverCredential) && hasText(approverEmployeeId);
+    }
+
+    /** 하나만 있으면 설정 실수다. 승인자가 있는 줄 알았는데 없는 상태를 만들지 않는다. */
+    @AssertTrue(message = "approver credential and approver employee id must be set together")
+    public boolean hasCompleteApproverOrNone() {
+        return hasText(approverCredential) == hasText(approverEmployeeId);
+    }
+
+    /** 승인자 Credential이 다른 역할과 같으면 그 역할로 승인할 수 있게 된다. */
+    @AssertTrue(message = "approver credential must differ from the viewer and operator credentials")
+    public boolean hasDistinctApproverCredential() {
+        return !hasText(approverCredential)
+                || (!approverCredential.equals(viewerCredential) && !approverCredential.equals(operatorCredential));
+    }
+
+    /** 직무 분리: 업무를 요청하는 직원이 그 승인까지 하면 사람의 확인이 아니게 된다. */
+    @AssertTrue(message = "approver employee must differ from the operator employee")
+    public boolean hasSeparateApproverEmployee() {
+        return !hasText(approverEmployeeId) || !approverEmployeeId.equals(operatorEmployeeId);
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
 
     @AssertTrue(message = "viewer and operator credentials must differ")
     public boolean hasDistinctCredentials() {

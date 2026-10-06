@@ -61,7 +61,7 @@ public class AuditEvidenceRecorder {
      * 통로가 된다({@code docs/06} §26).
      */
     @Transactional
-    public void record(
+    public AuditEvent record(
             String requestId,
             String agentRunId,
             String verifiedAgentId,
@@ -79,5 +79,6 @@ public class AuditEvidenceRecorder {
             // 이미 확정된 기록이거나, 같은 requestId에 다른 근거가 온 경우다. 둘 다 덮어쓰면 안 된다.
             throw new AuditEvidenceRejectedException(requestId, rejected);
         }
+        return event;
     }
 }

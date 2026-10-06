@@ -321,7 +321,7 @@ OPA
 | Prompt Injection 차단 조건 충족 | BLOCK |
 | Prompt Risk가 Alert 구간 | ALLOW + `riskFlagged=true` |
 | Behavior Risk가 Alert 구간 | ALLOW + `riskFlagged=true` |
-| Behavior Risk가 Critical Threshold 이상 (다른 차단 사유 없음) | APPROVAL — 실행하지 않고 사람의 확인 대기 (`loan-review-policy-3`) |
+| Behavior Risk가 Critical Threshold 이상 (다른 차단 사유 없음) | APPROVAL — 실행하지 않고 사람의 확인 대기 (`loan-review-policy-3`). 승인 후 다시 실행하면 ALLOW (`loan-review-policy-4`) |
 | Hard Request Limit 초과 | AI와 무관하게 BLOCK |
 | Risk Engine 또는 OPA 필수 서비스 오류 | Fail-closed BLOCK |
 

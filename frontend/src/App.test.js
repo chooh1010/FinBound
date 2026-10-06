@@ -49,6 +49,8 @@ describe('FinBound P0 application', () => {
   it('renders the real AgentRun, Passport, and effective permission in the protection panel', async () => {
     const jsonResponse = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) })
     const fetchImpl = vi.fn()
+      // 세션을 시작하면 먼저 역할을 묻는다(메뉴 선택용).
+      .mockResolvedValueOnce(jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }))
       .mockResolvedValueOnce(jsonResponse({
         agentRunId: 'RUN-REAL-1',
         passportId: 'PASS-REAL-1',
@@ -97,6 +99,8 @@ describe('FinBound P0 application', () => {
   it('never falls back to Mock protection details when a real execution lookup fails', async () => {
     const jsonResponse = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) })
     const fetchImpl = vi.fn()
+      // 세션을 시작하면 먼저 역할을 묻는다(메뉴 선택용).
+      .mockResolvedValueOnce(jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }))
       .mockResolvedValueOnce(jsonResponse({
         agentRunId: 'RUN-REAL-PARTIAL',
         passportId: 'PASS-REAL-PARTIAL',
@@ -694,5 +698,240 @@ describe('FinBound P0 application', () => {
 
     expect(requestIds.every((requestId) => uuidPattern.test(requestId))).toBe(true)
     expect(events.flatMap((event) => event.reasonCodes)).not.toContain('POLICY_REQUIREMENTS_MET')
+  })
+})
+
+describe('human approval screens', () => {
+  const jsonResponse = (body, status = 200) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => JSON.stringify(body),
+  })
+  const pending = {
+    approvalRequestId: 'APR-1',
+    requestId: 'REQ-1',
+    requesterEmployeeId: 'EMP-101',
+    targetConsumerId: 'CUST-1001',
+    requestedTool: 'CREDIT_SCORE_READ',
+    requestedData: ['CREDIT_SCORE'],
+    reasonCodes: ['BEHAVIOR_ANOMALY'],
+    status: 'PENDING',
+    expiresAt: '2999-01-01T00:00:00Z',
+  }
+
+  async function startSession(wrapper, credential) {
+    await wrapper.get('#core-credential').setValue(credential)
+    await wrapper.get('.credential-panel form').trigger('submit')
+    await flushPromises()
+  }
+
+  it('shows an approver only the approval and dashboard screens and records a decision', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'APPROVER', employeeId: 'EMP-201' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [pending] }))
+      .mockResolvedValueOnce(jsonResponse({ ...pending, status: 'APPROVED' }))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+
+    await startSession(wrapper, 'approver-runtime-only')
+
+    expect(wrapper.find('[data-screen="run"]').exists()).toBe(false)
+    expect(wrapper.find('[data-screen="approvals"]').exists()).toBe(true)
+    expect(wrapper.get('h1').text()).toBe('승인 요청')
+    expect(wrapper.get('[data-approval="APR-1"]').text()).toContain('CUST-1001')
+
+    await wrapper.get('#reason-APR-1').setValue('CUSTOMER_VERIFIED')
+    await wrapper.get('[data-approval="APR-1"] [data-action="approve"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchImpl.mock.calls[2][0]).toContain('/api/v1/approval-requests/APR-1/approve')
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body)).toEqual({ reason: 'CUSTOMER_VERIFIED' })
+    expect(wrapper.find('[data-approval="APR-1"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('APR-1을 승인했습니다')
+  })
+
+  it('explains why an approver cannot decide their own request', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'APPROVER', employeeId: 'EMP-101' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [pending] }))
+      .mockResolvedValueOnce(jsonResponse({ reasonCode: 'APPROVAL_SELF_DECISION', detail: 'self' }, 403))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+
+    await startSession(wrapper, 'approver-runtime-only')
+    await wrapper.get('[data-approval="APR-1"] [data-action="reject"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('본인이 요청한 건은 승인하거나 거절할 수 없습니다.')
+    expect(wrapper.find('[data-approval="APR-1"]').exists()).toBe(true)
+  })
+
+  it('lets the operator rerun an approved request with its approval', async () => {
+    const execution = (status, extra) => jsonResponse({ agentRunId: status, status: 'COMPLETED', ...extra })
+    const approvalAttempt = {
+      requestId: 'REQ-1',
+      requestedTool: 'CREDIT_SCORE_READ',
+      targetConsumerId: 'CUST-1001',
+      requestedData: ['CREDIT_SCORE'],
+      systemOutcome: 'COMPLETED',
+      reasonCodes: [],
+    }
+    const permission = jsonResponse({
+      agentEffectivePermission: { allowedTools: ['CREDIT_SCORE_READ'], allowedData: ['CREDIT_SCORE'] },
+      withheldTools: [],
+    })
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }))
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-1', status: 'RUNNING' }))
+      .mockResolvedValueOnce(permission)
+      .mockResolvedValueOnce(execution('RUN-1', {
+        reasonCodes: ['BEHAVIOR_ANOMALY'],
+        attempts: [{ ...approvalAttempt, decision: 'APPROVAL', reasonCodes: ['BEHAVIOR_ANOMALY'],
+          downstreamReached: false, responseReleased: false }],
+        approvals: [{ approvalRequestId: 'APR-1', requestId: 'REQ-1', status: 'APPROVED',
+          validUntil: '2999-01-01T00:00:00Z' }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-2', status: 'RUNNING' }))
+      .mockResolvedValueOnce(permission)
+      .mockResolvedValueOnce(execution('RUN-2', {
+        reasonCodes: [],
+        attempts: [{ ...approvalAttempt, decision: 'ALLOW', downstreamReached: true, responseReleased: true,
+          approvalRequestId: 'APR-1' }],
+        approvals: [],
+      }))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+
+    await startSession(wrapper, 'operator-runtime-only')
+    await wrapper.get('.agent-task-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('승인된 조회가 있습니다')
+    await wrapper.get('.rerun-approved-button').trigger('click')
+    await flushPromises()
+
+    expect(JSON.parse(fetchImpl.mock.calls[4][1].body).approvalRequestId).toBe('APR-1')
+    expect(wrapper.text()).toContain('AI 업무 처리가 완료되었습니다')
+    expect(wrapper.find('.rerun-approved-button').exists()).toBe(false)
+  })
+
+  function deferred() {
+    let resolve
+    const promise = new Promise((done) => { resolve = done })
+    return { promise, resolve }
+  }
+
+  it('drops a late execution that belongs to the work the operator left', async () => {
+    const late = deferred()
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }))
+      .mockImplementationOnce(() => late.promise)
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'operator-runtime-only')
+
+    await wrapper.get('.agent-task-form').trigger('submit')
+    const cards = wrapper.findAll('.work-card')
+    await cards[1].trigger('click')
+    late.resolve(jsonResponse({ reasonCode: 'APPROVAL_NOT_APPLICABLE', detail: 'late' }, 409))
+    await flushPromises()
+
+    // 늦게 온 응답은 지금 업무(두 번째 카드) 아래에 아무것도 남기지 않는다.
+    expect(wrapper.find('.execution-error').exists()).toBe(false)
+    expect(wrapper.find('.rerun-approved-button').exists()).toBe(false)
+  })
+
+  it('refreshes a pending approval and then offers the rerun', async () => {
+    const permission = jsonResponse({
+      agentEffectivePermission: { allowedTools: ['CREDIT_SCORE_READ'], allowedData: ['CREDIT_SCORE'] },
+      withheldTools: [],
+    })
+    const attempt = {
+      requestId: 'REQ-1', requestedTool: 'CREDIT_SCORE_READ', targetConsumerId: 'CUST-1001',
+      requestedData: ['CREDIT_SCORE'], decision: 'APPROVAL', systemOutcome: 'COMPLETED',
+      reasonCodes: ['BEHAVIOR_ANOMALY'], downstreamReached: false, responseReleased: false,
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }))
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-1', status: 'RUNNING' }))
+      .mockResolvedValueOnce(permission)
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-1', status: 'COMPLETED', reasonCodes: ['AUDIT_APPROVAL_PENDING', 'BEHAVIOR_ANOMALY'],
+        attempts: [attempt], approvals: [{ approvalRequestId: 'APR-1', requestId: 'REQ-1', status: 'PENDING' }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-1', status: 'COMPLETED', reasonCodes: ['BEHAVIOR_ANOMALY'], attempts: [attempt],
+        approvals: [{ approvalRequestId: 'APR-1', requestId: 'REQ-1', status: 'APPROVED',
+          validUntil: '2999-01-01T00:00:00Z' }],
+      }))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'operator-runtime-only')
+    await wrapper.get('.agent-task-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.rerun-approved-button').exists()).toBe(false)
+
+    await wrapper.get('.refresh-approval-button').trigger('click')
+    await flushPromises()
+
+    expect(fetchImpl.mock.calls[4][0]).toContain('/api/v1/agent-runs/RUN-1/execution')
+    expect(wrapper.find('.rerun-approved-button').exists()).toBe(true)
+  })
+
+  it('lets the user retry when the role could not be read', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce(jsonResponse({ role: 'APPROVER', employeeId: 'EMP-201' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'approver-runtime-only')
+    expect(wrapper.find('[data-screen="approvals"]').exists()).toBe(false)
+
+    await wrapper.get('.role-warning button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.role-warning').exists()).toBe(false)
+    expect(wrapper.get('h1').text()).toBe('승인 요청')
+  })
+
+  it('ignores a role answer that arrives after the session ended', async () => {
+    const late = deferred()
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => late.promise)
+      .mockResolvedValueOnce(jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+
+    await wrapper.get('#core-credential').setValue('approver-runtime-only')
+    const firstStart = wrapper.get('.credential-panel form').trigger('submit')
+    // 첫 세션은 역할 응답을 기다리는 중이다. 화면은 아직 Credential 입력 상태다.
+    finboundApi.clearCredential()
+    await startSession(wrapper, 'operator-runtime-only')
+    late.resolve(jsonResponse({ role: 'APPROVER', employeeId: 'EMP-201' }))
+    await firstStart
+    await flushPromises()
+
+    expect(wrapper.find('[data-screen="approvals"]').exists()).toBe(false)
+  })
+
+  it('does not bring back a decided request when an earlier refresh lands late', async () => {
+    const lateList = deferred()
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ role: 'APPROVER', employeeId: 'EMP-201' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [pending] }))
+      .mockImplementationOnce(() => lateList.promise)
+      .mockResolvedValueOnce(jsonResponse({ ...pending, status: 'APPROVED' }))
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'approver-runtime-only')
+
+    await wrapper.get('.approvals-heading button').trigger('click')
+    await wrapper.get('[data-approval="APR-1"] [data-action="approve"]').trigger('click')
+    await flushPromises()
+    lateList.resolve(jsonResponse({ items: [pending] }))
+    await flushPromises()
+
+    expect(wrapper.find('[data-approval="APR-1"]').exists()).toBe(false)
   })
 })

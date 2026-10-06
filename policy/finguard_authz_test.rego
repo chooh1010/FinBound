@@ -21,6 +21,7 @@ base_input := {
         "behaviorRiskLevel": "LOW",
     },
     "limits": {"hardRequestLimitExceeded": false},
+    "approval": {"granted": false},
 }
 
 request_with_scope_status(scope_status) := object.union(
@@ -166,45 +167,157 @@ test_behavior_critical_asks_for_approval if {
     result.severity == "HIGH"
     result.riskFlagged
     result.reasonCodes == ["BEHAVIOR_ANOMALY"]
-    result.policyVersion == "loan-review-policy-3"
+    result.policyVersion == "loan-review-policy-4"
 }
 
-# 등급·한도의 모든 조합에서 판정은 정확히 하나이고 우선순위는 BLOCK > APPROVAL > ALLOW다.
+# 등급·한도·승인의 모든 조합에서 판정은 정확히 하나이고 우선순위는 BLOCK > APPROVAL > ALLOW다.
 # 규칙이 겹치면 이 평가 자체가 충돌 오류로 실패한다.
 test_decisions_are_exclusive_and_ordered if {
     every behavior in {"LOW", "ALERT", "CRITICAL"} {
         every prompt in {"LOW", "ALERT", "CRITICAL"} {
             every limited in {false, true} {
-                request := object.union(base_input, {
-                    "risk": {
-                        "promptRiskLevel": prompt,
-                        "promptInjectionDetected": prompt == "CRITICAL",
-                        "behaviorRiskLevel": behavior,
-                    },
-                    "limits": {"hardRequestLimitExceeded": limited},
-                })
-                result := authorization.decision with input as request
-                result.decision == expected_decision(behavior, prompt, limited)
+                every granted in {false, true} {
+                    request := object.union(base_input, {
+                        "risk": {
+                            "promptRiskLevel": prompt,
+                            "promptInjectionDetected": prompt == "CRITICAL",
+                            "behaviorRiskLevel": behavior,
+                        },
+                        "limits": {"hardRequestLimitExceeded": limited},
+                        "approval": {"granted": granted},
+                    })
+                    result := authorization.decision with input as request
+                    # 판정만이 아니라 심각도·위험 표시·사유까지 전부 맞아야 한다.
+                    object.remove(result, {"policyVersion"}) == expected_result(behavior, prompt, limited, granted)
+                }
             }
         }
     }
 }
 
-expected_decision(_, prompt, limited) := "BLOCK" if {
+expected_decision(_, prompt, limited, _) := "BLOCK" if {
     some blocked in [prompt == "CRITICAL", limited]
     blocked
 }
 
-expected_decision(behavior, prompt, limited) := "APPROVAL" if {
+expected_decision(behavior, prompt, limited, granted) := "APPROVAL" if {
     prompt != "CRITICAL"
     not limited
     behavior == "CRITICAL"
+    not granted
 }
 
-expected_decision(behavior, prompt, limited) := "ALLOW" if {
+expected_decision(behavior, prompt, limited, granted) := "ALLOW" if {
     prompt != "CRITICAL"
     not limited
-    behavior != "CRITICAL"
+    some passes in [behavior != "CRITICAL", granted]
+    passes
+}
+
+expected_result(behavior, prompt, limited, granted) := {
+    "decision": "BLOCK",
+    "severity": "CRITICAL",
+    "riskFlagged": true,
+    "reasonCodes": expected_block_reasons(prompt, limited),
+} if {
+    expected_decision(behavior, prompt, limited, granted) == "BLOCK"
+}
+
+expected_result(behavior, prompt, limited, granted) := {
+    "decision": "APPROVAL",
+    "severity": "HIGH",
+    "riskFlagged": true,
+    "reasonCodes": ["BEHAVIOR_ANOMALY"],
+} if {
+    expected_decision(behavior, prompt, limited, granted) == "APPROVAL"
+}
+
+expected_result(behavior, prompt, limited, granted) := {
+    "decision": "ALLOW",
+    "severity": expected_allow_severity(behavior, prompt),
+    "riskFlagged": expected_flag(behavior, prompt),
+    "reasonCodes": [],
+} if {
+    expected_decision(behavior, prompt, limited, granted) == "ALLOW"
+}
+
+expected_block_reasons(prompt, limited) := sort([code |
+    some pair in [[prompt == "CRITICAL", "PROMPT_INJECTION"], [limited, "HARD_REQUEST_LIMIT_EXCEEDED"]]
+    pair[0]
+    code := pair[1]
+])
+
+# 정책의 risk_flagged와 따로 적는다 — 같은 식을 가져다 쓰면 정책이 틀려도 테스트가 따라 틀린다.
+expected_flag(behavior, prompt) := true if { prompt == "ALERT" }
+
+expected_flag(behavior, _) := true if { behavior != "LOW" }
+
+expected_flag(behavior, prompt) := false if {
+    prompt != "ALERT"
+    behavior == "LOW"
+}
+
+expected_allow_severity(behavior, prompt) := "HIGH" if { expected_flag(behavior, prompt) }
+
+expected_allow_severity(behavior, prompt) := "LOW" if { not expected_flag(behavior, prompt) }
+
+# 승인 여부를 모르는 입력이 다른 차단 사유와 함께 오면 모든 사유가 정렬돼 남고, 승인 사유는 섞이지 않는다.
+test_malformed_approval_with_other_deny_reasons_keeps_every_reason if {
+    request := object.union(object.remove(request_with_scope_status(object.union(base_input.scopeStatus, {
+        "customerScope": "VIOLATION",
+    })), {"approval"}), {
+        "risk": {"promptRiskLevel": "CRITICAL", "promptInjectionDetected": true, "behaviorRiskLevel": "CRITICAL"},
+        "limits": {"hardRequestLimitExceeded": true},
+        "approval": {},
+    })
+    result := authorization.decision with input as request
+    result.decision == "BLOCK"
+    result.reasonCodes == [
+        "CASE_SCOPE_VIOLATION",
+        "CONTEXT_NOT_FOUND",
+        "HARD_REQUEST_LIMIT_EXCEEDED",
+        "PROMPT_INJECTION",
+    ]
+}
+
+# 승인이 행동 위험을 넘긴 ALLOW다. 위험은 사라지지 않았으므로 표시는 남긴다.
+test_granted_approval_allows_behavior_critical_and_keeps_the_flag if {
+    request := object.union(base_input, {
+        "risk": object.union(base_input.risk, {"behaviorRiskLevel": "CRITICAL"}),
+        "approval": {"granted": true},
+    })
+    result := authorization.decision with input as request
+    result.decision == "ALLOW"
+    result.severity == "HIGH"
+    result.riskFlagged
+    result.reasonCodes == []
+}
+
+# 승인은 차단 사유를 넘기지 않는다.
+test_granted_approval_does_not_lift_a_scope_violation if {
+    request := object.union(request_with_scope_status(object.union(base_input.scopeStatus, {
+        "customerScope": "VIOLATION",
+    })), {
+        "risk": object.union(base_input.risk, {"behaviorRiskLevel": "CRITICAL"}),
+        "approval": {"granted": true},
+    })
+    result := authorization.decision with input as request
+    result.decision == "BLOCK"
+    result.reasonCodes == ["CASE_SCOPE_VIOLATION"]
+}
+
+# 승인 여부를 모르는 입력은 막는다. 키가 없거나, 비었거나, boolean이 아닌 값이다.
+test_missing_or_malformed_approval_is_blocked if {
+    every approval in [{}, {"granted": null}, {"granted": "true"}, {"granted": 1}] {
+        # object.union은 중첩 객체를 합치므로, 먼저 지우고 넣어야 {}가 그대로 들어간다.
+        request := object.union(object.remove(base_input, {"approval"}), {"approval": approval})
+        result := authorization.decision with input as request
+        result.decision == "BLOCK"
+        result.reasonCodes == ["CONTEXT_NOT_FOUND"]
+    }
+    result := authorization.decision with input as object.remove(base_input, {"approval"})
+    result.decision == "BLOCK"
+    result.reasonCodes == ["CONTEXT_NOT_FOUND"]
 }
 
 test_behavior_critical_still_blocks_alongside_another_deny_reason if {

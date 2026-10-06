@@ -46,7 +46,11 @@
       "properties": {
         "behaviorRiskLevel": { "type": "string", "enum": ["LOW", "ALERT", "CRITICAL"] },
         "behaviorAnomalyDetected": { "type": "boolean" },
-        "hardRequestLimitExceeded": { "type": "boolean" }
+        "hardRequestLimitExceeded": { "type": "boolean" },
+        "approvalGranted": {
+          "$comment": "OPA input approval.granted (loan-review-policy-4). Optional so a gateway that does not send it yet stays valid; absent means the same as false.",
+          "type": "boolean"
+        }
       }
     }
   },

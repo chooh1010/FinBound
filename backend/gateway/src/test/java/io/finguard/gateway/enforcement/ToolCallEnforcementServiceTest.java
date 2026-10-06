@@ -178,8 +178,57 @@ class ToolCallEnforcementServiceTest {
     }
 
     @Test
+    void reusedRequestIdWithDifferentContentGetsNoCachedAnswer() {
+        when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
+            new AuthorizationOutcome(
+                new PolicyDecisionResult(PolicyDecision.BLOCK, "CRITICAL", true,
+                    List.of("CASE_SCOPE_VIOLATION"), "policy-1"),
+                0.10));
+        service.enforce(identity, request, "REQ-REUSED", "trace");
+        ToolCallRequest otherCustomer = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-2001",
+            List.of(FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+
+        // 같은 Request ID라도 내용이 다르면 처음 요청의 응답을 돌려주지 않는다(docs/04 §17).
+        EnforcementResult reused = service.enforce(identity, otherCustomer, "REQ-REUSED", "trace");
+        EnforcementResult otherAgent =
+            service.enforce(VerifiedAgentIdentity.verified("OTHER-AGENT"), request, "REQ-REUSED", "trace");
+        // 모든 Credential이 같은 agentId로 매핑되므로 어느 Credential인지까지 본다.
+        EnforcementResult otherCredential = service.enforce(
+            VerifiedAgentIdentity.verified("LOAN-AGENT-01", "agent-credential-9"), request, "REQ-REUSED", "trace");
+
+        assertThat(reused.status().value()).isEqualTo(409);
+        assertThat(reused.body().decision()).isNull();
+        assertThat(reused.body().reasonCodes()).containsExactly("DUPLICATE_REQUEST");
+        assertThat(otherAgent.status().value()).isEqualTo(409);
+        assertThat(otherCredential.status().value()).isEqualTo(409);
+        verify(authorizationService, times(1)).decide(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void theSameRequestWithItsDataInAnotherOrderStillGetsTheCachedAnswer() {
+        when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
+            new AuthorizationOutcome(
+                new PolicyDecisionResult(PolicyDecision.BLOCK, "CRITICAL", true,
+                    List.of("CASE_SCOPE_VIOLATION"), "policy-1"),
+                0.10));
+        ToolCallRequest twoData = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+            List.of(FinancialDataType.CREDIT_SCORE, FinancialDataType.INCOME), FinancialAction.READ);
+        ToolCallRequest reordered = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+            List.of(FinancialDataType.INCOME, FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+        EnforcementResult first = service.enforce(identity, twoData, "REQ-ORDER", "trace");
+
+        EnforcementResult again = service.enforce(identity, reordered, "REQ-ORDER", "trace");
+
+        assertThat(again).isEqualTo(first);
+        verify(authorizationService, times(1)).decide(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void approvalDoesNotRunTheToolAndAnswers202() {
-        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("CRITICAL", true, false);
+        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("CRITICAL", true, false, false);
         when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
             new AuthorizationOutcome(
                 new PolicyDecisionResult(PolicyDecision.APPROVAL, "HIGH", true,
@@ -245,7 +294,7 @@ class ToolCallEnforcementServiceTest {
     /** 판정에 닿은 결과는 판정 입력 스냅샷을 Core로 넘긴다 — ALLOW 완료와 downstream 오류 모두. */
     @Test
     void decidedOutcomesForwardThePolicyInputSnapshot() {
-        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("ALERT", false, false);
+        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("ALERT", false, false, false);
         when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
             new AuthorizationOutcome(
                 new PolicyDecisionResult(PolicyDecision.ALLOW, "MEDIUM", false, List.of(), "policy-1"),
@@ -334,6 +383,38 @@ class ToolCallEnforcementServiceTest {
             assertThat(duplicate.status().value()).isEqualTo(403);
             assertThat(duplicate.body().reasonCodes()).containsExactly("DUPLICATE_REQUEST");
             assertThat(first.get().status().is2xxSuccessful()).isTrue();
+        }
+    }
+
+    @Test
+    void differentContentWhileTheFirstIsStillRunningIsAConflict() throws Exception {
+        CountDownLatch auditStarted = new CountDownLatch(1);
+        CountDownLatch releaseAudit = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            auditStarted.countDown();
+            releaseAudit.await();
+            return null;
+        }).when(coreClient).createAudit(any(), any(), any());
+        when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(allowOutcome());
+        when(downstreamClient.execute(any(), any(), any())).thenReturn(
+            new DownstreamToolResult("REQ-6", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+                Map.of("creditScore", 812)));
+        ToolCallRequest otherCustomer = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-2001",
+            List.of(FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<EnforcementResult> first =
+                executor.submit(() -> service.enforce(identity, request, "REQ-6", "trace"));
+            auditStarted.await();
+
+            EnforcementResult other = service.enforce(identity, otherCustomer, "REQ-6", "trace");
+            releaseAudit.countDown();
+
+            assertThat(other.status().value()).isEqualTo(409);
+            assertThat(other.body().decision()).isNull();
+            assertThat(first.get().status().is2xxSuccessful()).isTrue();
+            verify(authorizationService, times(1)).decide(any(), any(), any(), any(), any());
         }
     }
 

@@ -3,6 +3,8 @@ package io.finguard.core.security;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
@@ -48,6 +50,40 @@ class CoreApiPropertiesTest {
                             .hasMessageContaining("CoreApiProperties")
                             .rootCause()
                             .hasMessageContaining("credentials must differ");
+                });
+    }
+
+    @Test
+    void startsWithACompleteSeparateApprover() {
+        runner.withPropertyValues(
+                        "finguard.api.viewer-credential=viewer-secret",
+                        "finguard.api.operator-credential=operator-secret",
+                        "finguard.api.operator-employee-id=EMP-101",
+                        "finguard.api.approver-credential=approver-secret",
+                        "finguard.api.approver-employee-id=EMP-201")
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "approver-secret, '', set together",
+        "'', EMP-201, set together",
+        "'   ', EMP-201, set together",
+        "operator-secret, EMP-201, must differ from the viewer and operator",
+        "viewer-secret, EMP-201, must differ from the viewer and operator",
+        "approver-secret, EMP-101, must differ from the operator employee",
+    })
+    void failsToStartWithAnIncompleteOrOverlappingApprover(
+            String approverCredential, String approverEmployeeId, String message) {
+        runner.withPropertyValues(
+                        "finguard.api.viewer-credential=viewer-secret",
+                        "finguard.api.operator-credential=operator-secret",
+                        "finguard.api.operator-employee-id=EMP-101",
+                        "finguard.api.approver-credential=" + approverCredential,
+                        "finguard.api.approver-employee-id=" + approverEmployeeId)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining(message);
                 });
     }
 

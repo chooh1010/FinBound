@@ -57,11 +57,13 @@ public class ToolCallEnforcementService {
         "BEHAVIOR_RISK_UNAVAILABLE",
         "POLICY_ENGINE_UNAVAILABLE");
 
-    private final Cache<String, EnforcementResult> completedResponses = Caffeine.newBuilder()
+    // 응답은 처음 요청한 Agent와 요청 내용에 묶어 둔다. Request ID는 호출자가 고르는 값이라, 그것만으로 돌려주면
+    // 다른 요청이 남의 응답을 받아 간다(docs/04 §17).
+    private final Cache<String, CachedResponse> completedResponses = Caffeine.newBuilder()
         .expireAfterWrite(Duration.ofMinutes(10))
         .maximumSize(10_000)
         .build();
-    private final ConcurrentMap<String, Boolean> inFlightRequests = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, RequestBinding> inFlightRequests = new ConcurrentHashMap<>();
 
     private final AuthorizationService authorizationService;
     private final CoreClient coreClient;
@@ -97,15 +99,29 @@ public class ToolCallEnforcementService {
                                      ToolCallRequest request,
                                      String requestId,
                                      String traceparent) {
-        EnforcementResult cached = completedResponses.getIfPresent(requestId);
+        RequestBinding binding =
+            new RequestBinding(identity.agentId(), identity.credentialId(), RequestFingerprint.of(request));
+        CachedResponse cached = completedResponses.getIfPresent(requestId);
         if (cached != null) {
-            return cached;
+            if (cached.binding().equals(binding)) {
+                return cached.result();
+            }
+            return duplicateRequestConflict(requestId);
         }
-        if (inFlightRequests.putIfAbsent(requestId, Boolean.TRUE) != null) {
+        RequestBinding inFlight = inFlightRequests.putIfAbsent(requestId, binding);
+        if (inFlight != null) {
+            if (!inFlight.equals(binding)) {
+                return duplicateRequestConflict(requestId);
+            }
             return block(requestId, "DUPLICATE_REQUEST");
         }
 
         try {
+            // 앞선 요청이 응답을 남기고 진행 중 표시를 지운 직후에 들어왔을 수 있다. 실행 전에 다시 본다.
+            CachedResponse completed = completedResponses.getIfPresent(requestId);
+            if (completed != null) {
+                return completed.binding().equals(binding) ? completed.result() : duplicateRequestConflict(requestId);
+            }
             return executeFirstAttempt(identity, request, requestId, traceparent);
         } finally {
             inFlightRequests.remove(requestId);
@@ -138,14 +154,14 @@ public class ToolCallEnforcementService {
             case BLOCK -> {
                 EnforcementResult result = block(requestId, outcome.reasonCodes());
                 safeUpdateOutcome(identity, requestId, traceparent, blockOutcome(outcome, clock.instant()));
-                completedResponses.put(requestId, result);
+                remember(requestId, result);
                 yield result;
             }
             case APPROVAL -> {
                 EnforcementResult result = new EnforcementResult(
                     HttpStatus.ACCEPTED, ToolCallResponse.approval(requestId, outcome.reasonCodes()));
                 safeUpdateOutcome(identity, requestId, traceparent, approvalOutcome(outcome, clock.instant()));
-                completedResponses.put(requestId, result);
+                remember(requestId, result);
                 yield result;
             }
         };
@@ -164,7 +180,7 @@ public class ToolCallEnforcementService {
                 HttpStatus.OK,
                 ToolCallResponse.allow(requestId, downstreamResult(downstream)));
             safeUpdateOutcome(identity, requestId, traceparent, allowOutcome(outcome, clock.instant(), latencyMs));
-            completedResponses.put(requestId, result);
+            remember(requestId, result);
             return result;
         } catch (DownstreamUnavailableException e) {
             log.warn("Downstream failed requestId={} reached={}", requestId, e.downstreamReached(), e);
@@ -192,7 +208,7 @@ public class ToolCallEnforcementService {
         EnforcementResult result = new EnforcementResult(
             status,
             ToolCallResponse.systemError(requestId, reasonCode, List.of(reasonCode)));
-        completedResponses.put(requestId, result);
+        remember(requestId, result);
         return result;
     }
 
@@ -366,5 +382,26 @@ public class ToolCallEnforcementService {
 
     private BigDecimal behaviorRisk(AuthorizationOutcome outcome) {
         return outcome.behaviorRisk() == null ? null : BigDecimal.valueOf(outcome.behaviorRisk());
+    }
+
+    /** 판정까지 간 응답만 기억한다. 진행 중 표시에 담아 둔 Agent·요청 지문과 함께 저장한다. */
+    private void remember(String requestId, EnforcementResult result) {
+        RequestBinding binding = inFlightRequests.get(requestId);
+        if (binding != null) {
+            completedResponses.put(requestId, new CachedResponse(binding, result));
+        }
+    }
+
+    /** 다른 호출자나 다른 내용이 같은 Request ID를 쓴 경우. 처음 요청의 응답을 주지 않는다(docs/04 §17). */
+    private static EnforcementResult duplicateRequestConflict(String requestId) {
+        return new EnforcementResult(
+            HttpStatus.CONFLICT,
+            ToolCallResponse.systemError(requestId, "DUPLICATE_REQUEST", List.of("DUPLICATE_REQUEST")));
+    }
+
+    private record RequestBinding(String agentId, String credentialId, String fingerprint) {
+    }
+
+    private record CachedResponse(RequestBinding binding, EnforcementResult result) {
     }
 }

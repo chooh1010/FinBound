@@ -49,6 +49,11 @@ public class ApprovalRequestEvent {
     @Column(name = "actor_id", length = 64)
     private String actorId;
 
+    /** 승인·거절 때 승인자가 고른 사유. 자유 메모는 받지 않는다(ApprovalDecisionReason). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reason", length = 64)
+    private ApprovalDecisionReason reason;
+
     protected ApprovalRequestEvent() {
     }
 
@@ -58,12 +63,38 @@ public class ApprovalRequestEvent {
             ApprovalEventType eventType,
             Instant occurredAt,
             ApprovalActorType actorType,
-            String actorId) {
+            String actorId,
+            ApprovalDecisionReason reason) {
         this.approvalRequest = approvalRequest;
         this.sequence = sequence;
         this.eventType = eventType;
         this.occurredAt = occurredAt;
         this.actorType = actorType;
         this.actorId = actorId;
+        this.reason = reason;
+    }
+
+    public int getSequence() {
+        return sequence;
+    }
+
+    public ApprovalEventType getEventType() {
+        return eventType;
+    }
+
+    public Instant getOccurredAt() {
+        return occurredAt;
+    }
+
+    public ApprovalActorType getActorType() {
+        return actorType;
+    }
+
+    public String getActorId() {
+        return actorId;
+    }
+
+    public ApprovalDecisionReason getReason() {
+        return reason;
     }
 }

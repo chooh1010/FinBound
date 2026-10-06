@@ -8,6 +8,10 @@ public record AuthorizationContext(
     String requestId,
     ScopeStatus scopeStatus,
     RiskInput risk,
-    HardLimits limits
+    HardLimits limits,
+    ApprovalInput approval
 ) {
+    /** OPA 입력 {@code input.approval}. policy-4부터 필수다(docs/04 §12). */
+    public record ApprovalInput(boolean granted) {
+    }
 }

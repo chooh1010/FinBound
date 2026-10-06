@@ -38,6 +38,16 @@ public enum ReasonCode {
     AUDIT_OUTCOME_UNKNOWN,
     /** Core가 붙이는 코드다. 승인을 기다리는 시도가 있는 실행에 표시한다 — docs/04 §3. */
     AUDIT_APPROVAL_PENDING,
+    /** Core가 붙이는 코드다. 승인 요청이 거절된 시도가 있는 실행에 표시한다. */
+    AUDIT_APPROVAL_REJECTED,
+    /** Core가 붙이는 코드다. 승인 요청이 처리되지 않거나 쓰이지 않은 채 만료된 실행에 표시한다. */
+    AUDIT_APPROVAL_EXPIRED,
+    /** 요청한 직원이 자기 승인 요청을 승인·거절하려 했다. */
+    APPROVAL_SELF_DECISION,
+    /** 이미 처리됐거나 기한이 지난 승인 요청이다. */
+    APPROVAL_NOT_PENDING,
+    /** 다시 실행에 지정한 승인을 이 요청에 쓸 수 없다. */
+    APPROVAL_NOT_APPLICABLE,
     SECURITY_EVENT_WRITE_FAILED,
     DOWNSTREAM_ERROR,
     DOWNSTREAM_TIMEOUT,

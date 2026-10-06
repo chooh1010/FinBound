@@ -861,7 +861,7 @@ Vue Frontend
 | AC-09 | Agent Identity 불일치 | `AGENT_IDENTITY_MISMATCH`, BLOCK |
 | AC-10 | 인증 실패 | Business Audit 생성 X, 최소 SecurityAuthEvent DB 저장 |
 | AC-11 | Behavior Alert 구간 단독 | ALLOW + 위험 표시 |
-| AC-12 | Scope 정상 + Hard Limit 미초과 + Behavior Critical | APPROVAL(202), Downstream 0회, 승인 요청 PENDING (`loan-review-policy-3`) |
+| AC-12 | Scope 정상 + Hard Limit 미초과 + Behavior Critical | APPROVAL(202), Downstream 0회, 승인 요청 PENDING (`loan-review-policy-3`). 승인 뒤 그 승인으로 다시 실행하면 ALLOW, 승인은 CONSUMED (`loan-review-policy-4`) |
 | AC-13 | Hard Request Limit 초과 | Rule 기반 BLOCK |
 | AC-14 | Risk/OPA/Core 필수 의존성 오류 | Fail-closed BLOCK |
 | AC-15 | Business Audit 선저장 실패 | Downstream 0회 |

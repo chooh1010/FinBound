@@ -73,7 +73,9 @@ public record AuditOutcomeRequest(
     public boolean isWithoutCoreOnlyReason() {
         return reasonCodes == null
                 || (!reasonCodes.contains(ReasonCode.AUDIT_OUTCOME_UNKNOWN)
-                        && !reasonCodes.contains(ReasonCode.AUDIT_APPROVAL_PENDING));
+                        && !reasonCodes.contains(ReasonCode.AUDIT_APPROVAL_PENDING)
+                        && !reasonCodes.contains(ReasonCode.AUDIT_APPROVAL_REJECTED)
+                        && !reasonCodes.contains(ReasonCode.AUDIT_APPROVAL_EXPIRED));
     }
 
     /** 판정에 닿지 못한 결과(fail-closed)에는 판정 입력이 없다. 있으면 지어낸 근거다. */

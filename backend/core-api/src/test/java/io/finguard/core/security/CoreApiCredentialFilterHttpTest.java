@@ -39,6 +39,8 @@ import com.fasterxml.jackson.databind.JsonNode;
             "finguard.api.viewer-credential=test-viewer-credential",
             "finguard.api.operator-credential=test-operator-credential",
             "finguard.api.operator-employee-id=EMP-101",
+            "finguard.api.approver-credential=test-approver-credential",
+            "finguard.api.approver-employee-id=EMP-201",
         })
 @ActiveProfiles("local")
 @Testcontainers
@@ -320,6 +322,56 @@ class CoreApiCredentialFilterHttpTest {
                         """,
                         headers),
                 JsonNode.class);
+    }
+
+    @Test
+    void approverIsRecognisedButCannotStartWork() {
+        long before = agentRunCount();
+        long forbiddenEvents = securityEventCount("CORE_API_ROLE_FORBIDDEN");
+
+        ResponseEntity<JsonNode> me = get("/api/v1/me", "test-approver-credential");
+        ResponseEntity<JsonNode> start = createAgentRun("test-approver-credential", "EMP-201");
+
+        assertThat(me.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(me.getBody().get("role").asText()).isEqualTo("APPROVER");
+        assertThat(me.getBody().get("employeeId").asText()).isEqualTo("EMP-201");
+        // 유효한 Credential이지만 역할이 아니다 — 401이 아니라 403이다(docs/04 §15.1).
+        assertThat(start.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(start.getBody().get("reasonCode").asText()).isEqualTo("CORE_API_ROLE_FORBIDDEN");
+        assertThat(agentRunCount()).isEqualTo(before);
+        assertThat(passportCount()).isZero();
+        // 역할 거부도 인증 경계 기록에 남는다(docs/04 §2).
+        assertThat(securityEventCount("CORE_API_ROLE_FORBIDDEN")).isEqualTo(forbiddenEvents + 1);
+    }
+
+    @Test
+    void approverReadsTheDashboardButNotPermissionComparisons() {
+        assertThat(get("/api/v1/dashboard/summary", "test-approver-credential").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(get("/api/v1/audit-events", "test-approver-credential").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(get("/api/v1/agent-runs/RUN-NONE/permission-comparison", "test-approver-credential")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get("/api/v1/agent-runs/RUN-NONE/execution", "test-approver-credential").getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void meTellsEachRoleApartAndAViewerHasNoEmployee() {
+        JsonNode viewer = get("/api/v1/me", "test-viewer-credential").getBody();
+        JsonNode operator = get("/api/v1/me", "test-operator-credential").getBody();
+
+        assertThat(viewer.get("role").asText()).isEqualTo("VIEWER");
+        assertThat(viewer.get("employeeId").isNull()).isTrue();
+        assertThat(operator.get("role").asText()).isEqualTo("OPERATOR");
+        assertThat(operator.get("employeeId").asText()).isEqualTo("EMP-101");
+        assertThat(get("/api/v1/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    private ResponseEntity<JsonNode> get(String path, String bearer) {
+        return restTemplate.exchange(
+                URI.create(base() + path), HttpMethod.GET, new HttpEntity<>(bearerHeaders(bearer)), JsonNode.class);
     }
 
     /** actuator는 필터 등록 패턴 밖이다. 인증 경계가 어디까지인지 명시해 둔다. */

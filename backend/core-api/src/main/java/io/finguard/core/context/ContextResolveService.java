@@ -10,11 +10,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.finguard.core.approval.ApprovalConsumption;
 import io.finguard.core.audit.AuditEvidenceRecorder;
+import io.finguard.core.context.ContextResolveResponse.ApprovalView;
 import io.finguard.core.context.ContextResolveResponse.PromptRiskView;
 import io.finguard.core.context.ContextResolveResponse.References;
 import io.finguard.core.domain.AgentRun;
 import io.finguard.core.domain.AgentRunStatus;
+import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditScopeStatus;
 import io.finguard.core.domain.ConsumerMandate;
 import io.finguard.core.domain.EmployeeAuthority;
@@ -67,6 +70,7 @@ public class ContextResolveService {
     private final PromptRiskSnapshotRepository promptRiskSnapshots;
     private final FinancialContextResolver resolver;
     private final AuditEvidenceRecorder auditEvidence;
+    private final ApprovalConsumption approvalConsumption;
     private final Clock clock;
 
     public ContextResolveService(
@@ -80,6 +84,7 @@ public class ContextResolveService {
             PromptRiskSnapshotRepository promptRiskSnapshots,
             FinancialContextResolver resolver,
             AuditEvidenceRecorder auditEvidence,
+            ApprovalConsumption approvalConsumption,
             Clock clock) {
         this.taskPassports = taskPassports;
         this.agentRuns = agentRuns;
@@ -91,6 +96,7 @@ public class ContextResolveService {
         this.promptRiskSnapshots = promptRiskSnapshots;
         this.resolver = resolver;
         this.auditEvidence = auditEvidence;
+        this.approvalConsumption = approvalConsumption;
         this.clock = clock;
     }
 
@@ -154,7 +160,7 @@ public class ContextResolveService {
         // 식별자는 요청 본문이 아니라 해석된 Passport에서 가져온다 — 본문 값은 인증수단이 아니다(docs/04 §1.4).
         // 어느 행에 쓸지는 헤더로 검증된 Agent까지 봐야 정해진다. 본문이 고르는 값만으로는 소유를
         // 증명하지 못해 남의 감사행에 쓰게 된다.
-        auditEvidence.record(
+        AuditEvent auditEvent = auditEvidence.record(
                 request.requestId().toString(),
                 agentRun.getAgentRunId(),
                 trustedVerifiedAgentId,
@@ -169,6 +175,15 @@ public class ContextResolveService {
                         promptRisk.getRiskLevel(),
                         promptRisk.getModelVersion()));
 
+        // 이 실행에 묶인 승인을 이번 호출에 쓴다. 근거 기록과 같은 트랜잭션이다 — 함께 남거나 함께 사라진다.
+        // 정책이 어차피 막을 호출(Scope 위반, Prompt 공격 탐지)에는 쓰지 않는다. 승인은 되돌려 주지 않으므로
+        // 막힐 호출에 쓰면 그대로 사라진다. 이 호출은 근거만 남고 승인 없이 판정된다(docs/04 §7).
+        boolean blockedAnyway = scopeStatus.hasViolation() || promptRisk.isDetected();
+        Optional<String> consumedApproval = blockedAnyway
+                ? Optional.empty()
+                : approvalConsumption.consume(
+                        auditEvent, request.targetConsumerId(), request.requestedTool(), request.requestedData());
+
         return new ContextResolveResponse(
                 request.requestId(),
                 new References(
@@ -180,7 +195,8 @@ public class ContextResolveService {
                         promptRisk.getRiskLevel(),
                         promptRisk.isDetected(),
                         promptRisk.getInputHash(),
-                        promptRisk.getModelVersion()));
+                        promptRisk.getModelVersion()),
+                ApprovalView.of(consumedApproval));
     }
 
     /**

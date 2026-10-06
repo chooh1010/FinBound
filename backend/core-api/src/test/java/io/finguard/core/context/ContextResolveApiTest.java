@@ -70,6 +70,8 @@ class ContextResolveApiTest {
     /** REQUEST_ID를 테스트끼리 공유하므로 앞 테스트가 남긴 감사행을 지운다. */
     @BeforeEach
     void clearAuditEvents() {
+        // 승인이 감사 행을 가리킬 수 있으므로 승인부터 지운다.
+        jdbcTemplate.execute("truncate approval_request_events, approval_request_reason_codes, approval_requests");
         jdbcTemplate.update("delete from audit_event_requested_data");
         jdbcTemplate.update("delete from audit_event_reason_codes");
         jdbcTemplate.update("delete from audit_events");
@@ -111,6 +113,37 @@ class ContextResolveApiTest {
         assertThat(promptRisk.get("promptRisk").decimalValue()).isZero();
         assertThat(promptRisk.get("inputHash").asText()).startsWith("sha256:");
         assertThat(promptRisk.get("modelVersion").asText()).isEqualTo("prompt-guard-6");
+    }
+
+    @Test
+    void leavesABoundApprovalUnusedWhileConsumptionIsSwitchedOff() {
+        // 기본값은 꺼짐이다. 옛 정책이 승인을 무시하는 동안 승인만 소진되지 않게(docs/04 §7).
+        RunReferences run = startAgentRun();
+        jdbcTemplate.update(
+                "insert into audit_events (audit_event_id, request_id, agent_id, agent_run_id, status,"
+                        + " requested_at, received_at, version)"
+                        + " values ('AUD-OLD', 'REQ-OLD', 'LOAN-AGENT-01', 'RUN-OLD', 'PROCESSING',"
+                        + " now() - interval '1 minute', now(), 0)");
+        jdbcTemplate.update(
+                "insert into approval_requests (approval_request_id, audit_event_id, agent_id, agent_run_id,"
+                        + " target_consumer_id, requested_tool, status, created_at, version, employee_id, task_type,"
+                        + " requested_data_key, expires_at, decided_at, decided_by, valid_until, bound_agent_run_id)"
+                        + " values ('APR-OFF', 'AUD-OLD', 'LOAN-AGENT-01', 'RUN-OLD', 'CUST-1001',"
+                        + " 'CREDIT_SCORE_READ', 'APPROVED', now(), 0, 'EMP-101', 'LOAN_REVIEW', 'CREDIT_SCORE',"
+                        + " now() + interval '30 minutes', now(), 'EMP-201', clock_timestamp() + interval '10 minutes',"
+                        + " ?)",
+                run.agentRunId());
+        createAudit(run);
+
+        ResponseEntity<JsonNode> response =
+                resolve(run, "LOAN-AGENT-01", "CUST-1001", "CREDIT_SCORE_READ", "CREDIT_SCORE");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().get("approval").get("granted").asBoolean()).isFalse();
+        assertThat(response.getBody().get("approval").has("approvalRequestId")).isFalse();
+        assertThat(jdbcTemplate.queryForObject(
+                        "select status from approval_requests where approval_request_id = 'APR-OFF'", String.class))
+                .isEqualTo("APPROVED");
     }
 
     @Test

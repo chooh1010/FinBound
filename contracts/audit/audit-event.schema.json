@@ -57,6 +57,10 @@
     },
     "reasonCodes": { "$ref": "#/$defs/reasonCodes" },
     "policyVersion": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "approvalRequestId": {
+      "$comment": "The approval consumed by this call (stage 4a). Core writes it at context resolve, before the policy runs, so any status can carry it: the row may still be PROCESSING, fail before the policy (ERROR), become OUTCOME_UNKNOWN, or end ALLOW/BLOCK.",
+      "$ref": "#/$defs/nonEmptyIdentifier"
+    },
     "systemOutcome": {
       "type": "string",
       "enum": ["COMPLETED", "ERROR"]

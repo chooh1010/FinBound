@@ -2,7 +2,7 @@ package finguard.authorization
 
 import rego.v1
 
-policy_version := "loan-review-policy-3"
+policy_version := "loan-review-policy-4"
 
 scope_status_keys := {
     "employeeAuthority",
@@ -45,6 +45,9 @@ valid_input if {
     valid_prompt_detection
     input.risk.behaviorRiskLevel in {"LOW", "ALERT", "CRITICAL"}
     input.limits.hardRequestLimitExceeded in {true, false}
+    # policy-4부터 필수다. Core가 Context Resolve에서 이 호출에 승인을 썼는지(docs/04 §12). 없거나 boolean이 아니면
+    # 승인 여부를 모르는 것이므로 막는다 — 모르는 것을 "승인 없음"으로 읽으면 이 키가 빠진 입력이 조용히 통과한다.
+    input.approval.granted in {true, false}
 }
 
 deny_reasons contains "CONTEXT_NOT_FOUND" if { not valid_input }
@@ -61,7 +64,12 @@ deny_reasons contains "PROMPT_INJECTION" if { input.risk.promptRiskLevel == "CRI
 # 행동 CRITICAL만으로는 차단하지 않는다. Isolation Forest 점수는 극단에서 포화돼 업무시간 빠른 반복과
 # 야간 누적을 안정적으로 가르지 못한다 — 같은 학습 코드에서도 시드에 따라 빠른 반복의 CRITICAL 비율이
 # 0%~62.5%로 흔들렸다. 자동 차단도 그대로 허용도 아닌 사람의 확인으로 보낸다(policy-3, docs/06 §11).
-approval_reasons contains "BEHAVIOR_ANOMALY" if { input.risk.behaviorRiskLevel == "CRITICAL" }
+# 사람이 승인했고 Core가 그 승인을 이 호출에 썼으면 다시 묻지 않는다(policy-4). 승인은 행동 위험만 넘긴다 —
+# 차단 사유(Scope 위반, Prompt 공격, 요청 한도)는 승인이 있어도 그대로 BLOCK이다.
+approval_reasons contains "BEHAVIOR_ANOMALY" if {
+    input.risk.behaviorRiskLevel == "CRITICAL"
+    input.approval.granted == false
+}
 deny_reasons contains "HARD_REQUEST_LIMIT_EXCEEDED" if { input.limits.hardRequestLimitExceeded }
 
 decision := {

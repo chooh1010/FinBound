@@ -178,11 +178,51 @@ class AuthorizationServiceTest {
 
         ArgumentCaptor<AuthorizationContext> context = ArgumentCaptor.forClass(AuthorizationContext.class);
         verify(opa).decide(context.capture());
-        assertThat(outcome.policyInput()).isEqualTo(new PolicyInputSnapshot("CRITICAL", true, true));
+        assertThat(outcome.policyInput()).isEqualTo(new PolicyInputSnapshot("CRITICAL", true, true, false));
         assertThat(outcome.policyInput().behaviorRiskLevel())
             .isEqualTo(context.getValue().risk().behaviorRiskLevel());
         assertThat(outcome.policyInput().hardRequestLimitExceeded())
             .isEqualTo(context.getValue().limits().hardRequestLimitExceeded());
+    }
+
+    @Test
+    void passesTheApprovalCoreUsedToThePolicyAndTheRecordedInput() {
+        ResolvedContext granted = new ResolvedContext(
+            UUID.randomUUID(),
+            new ResolvedContext.References("EMP-101", "LOAN-2026-001", "PASS-001"),
+            ScopeStatus.allOk(),
+            new PromptRiskSnapshot("EVALUATED", BigDecimal.valueOf(0.05), "LOW", false, "sha256:e", "prompt-guard-1"),
+            new ResolvedContext.Approval("APR-1", true));
+        when(core.resolveContext(any(), any(), any(), any())).thenReturn(granted);
+        when(core.behaviorHistory(any(), any(), any(), any()))
+            .thenReturn(new BehaviorHistory("LOAN-AGENT-01", "5m", List.of()));
+        when(ai.evaluateBehavior(any(), any(), any(), any(), any(), any(), any())).thenReturn(
+            new BehaviorRiskResult(0.91, "CRITICAL", true, -0.4, "SCORED", "features-1", "model-1"));
+        when(opa.decide(any())).thenReturn(
+            new PolicyDecisionResult(PolicyDecision.ALLOW, "HIGH", true, List.of(), "policy-4"));
+
+        AuthorizationOutcome outcome = service.decide(identity, request, "REQ-6", null, Instant.now());
+
+        ArgumentCaptor<AuthorizationContext> context = ArgumentCaptor.forClass(AuthorizationContext.class);
+        verify(opa).decide(context.capture());
+        assertThat(context.getValue().approval().granted()).isTrue();
+        assertThat(outcome.policyInput().approvalGranted()).isTrue();
+    }
+
+    @Test
+    void anOlderCoreWithoutTheApprovalFieldMeansNotGranted() {
+        when(core.resolveContext(any(), any(), any(), any())).thenReturn(resolvedContext());
+        when(core.behaviorHistory(any(), any(), any(), any()))
+            .thenReturn(new BehaviorHistory("LOAN-AGENT-01", "5m", List.of()));
+        when(ai.evaluateBehavior(any(), any(), any(), any(), any(), any(), any())).thenReturn(behaviorLow());
+        when(opa.decide(any())).thenReturn(
+            new PolicyDecisionResult(PolicyDecision.ALLOW, "LOW", false, List.of(), "policy-4"));
+
+        service.decide(identity, request, "REQ-7", null, Instant.now());
+
+        ArgumentCaptor<AuthorizationContext> context = ArgumentCaptor.forClass(AuthorizationContext.class);
+        verify(opa).decide(context.capture());
+        assertThat(context.getValue().approval().granted()).isFalse();
     }
 
     private ResolvedContext resolvedContext() {

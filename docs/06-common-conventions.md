@@ -143,6 +143,7 @@ Gateway가 보내는 값이 아니라 **Core만 기록하는 상태**다 — Gat
 | 시각 필드 | 의미 |
 |---|---|
 | `outcomeUnknownDetectedAt` | Core가 결과 미도착을 처음 기록한 시각. 이후 바뀌지 않는다 |
+| `approvalRequestId` | 이 호출이 쓴 승인 요청. Context Resolve 때(판정 전) 적히므로 어떤 상태의 행에도 있을 수 있다 |
 | `outcomeResolvedAt` | `OUTCOME_UNKNOWN`이던 행에 실제 결과가 늦게 도착해 확정된 시각. 이때 상태는 `COMPLETED` 또는 `ERROR`이고 `outcomeUnknownDetectedAt`은 남는다 |
 
 두 시각은 Core가 기록하는 시각이다. Gateway가 보낸 `completedAt`과 다른 시계를 쓰므로 서로 빼서
@@ -181,7 +182,8 @@ MASK       (미구현 — 응답 속 민감정보 검사 단계에서)
 `APPROVAL`은 "실행하지 않고 사람의 확인을 기다린다"는 판정이다. BLOCK처럼 Tool을 실행하지 않으므로 감사 행은
 `COMPLETED`로 한 번 확정되고 실행 측정값이 없다. 승인 여부는 감사 행이 아니라 별도 승인 요청
 (`approval_requests`, 상태 `PENDING`)이 가진다 — 확정된 감사 기록은 다시 쓰지 않는다(§10).
-승인·거절·만료와 승인 후 재개는 아직 없다.
+승인 요청은 APPROVER가 승인·거절하고, 처리되지 않으면 만료된다. 승인된 요청은 직원이 그 승인을 지정해 **다시 실행**할 때만
+쓰인다(자동 재개 없음, docs/04 §3·§15.1).
 
 시스템 장애는 Decision Enum에 `ERROR`를 추가하지 않고 Audit/System Outcome으로 표현한다.
 
@@ -396,6 +398,11 @@ UNKNOWN_PROMPT_ATTACK
 | `AUDIT_WRITE_FAILED` | Business Audit 저장 실패 |
 | `AUDIT_OUTCOME_UNKNOWN` | 결과 기록이 도착하지 않아 실행 결과를 확인할 수 없음 (AgentRun 실행 조회에 표시) |
 | `AUDIT_APPROVAL_PENDING` | 승인을 기다리는 시도가 있음 (AgentRun 실행 조회에 표시, 승인 요청이 `PENDING`일 때 Core가 파생) |
+| `AUDIT_APPROVAL_REJECTED` | 승인 요청이 거절됨 (실행 조회에 표시, Core가 파생) |
+| `AUDIT_APPROVAL_EXPIRED` | 승인 요청이 처리되지 않거나 쓰이지 않은 채 만료됨 (실행 조회에 표시, Core가 파생) |
+| `APPROVAL_SELF_DECISION` | 요청한 직원이 자기 승인 요청을 승인·거절하려 함 (`403`) |
+| `APPROVAL_NOT_PENDING` | 이미 처리됐거나 만료된 승인 요청을 승인·거절하려 함 (`409`) |
+| `APPROVAL_NOT_APPLICABLE` | 다시 실행에 지정한 승인이 이 요청과 맞지 않거나 쓸 수 없음 (`409`) |
 | `SECURITY_EVENT_WRITE_FAILED` | SecurityAuthEvent 저장 실패 |
 | `DOWNSTREAM_ERROR` | Mock Financial API 처리 오류 |
 | `DOWNSTREAM_TIMEOUT` | Mock Financial API Timeout |
@@ -533,7 +540,8 @@ Prompt Risk는 Runtime마다 새로 계산되는 행동 점수가 아니라 **�
 - Vue Dashboard는 Spring Read-only API만 호출한다.
 - PostgreSQL 직접 연결을 금지한다.
 - 전체 활동은 `ALLOW / BLOCK / APPROVAL / ERROR`를 모두 포함한다. `APPROVAL`은 "승인 필요"로 표시하고 별도 수
-  (`approval`)로 집계한다.
+  (`approval`)로 집계한다. 이 수는 그 시점의 판정이다 — 지금 승인 대기인지는 승인 요청 상태(§11)로 따로 보여 준다.
+- Dashboard 화면은 읽기 전용이다. 승인·거절은 APPROVER의 승인 요청 화면에서만 한다.
 - `OUTCOME_UNKNOWN`은 판정이 없으므로 `ALLOW / BLOCK / ERROR` 어디에도 넣지 않고 별도 수
   (`outcomeUnknown`)로 집계한다. 목록에는 "결과 미확인" 배지로, 상세에는 탐지 시각(해소됐다면
   해소 시각도)으로 표시한다. 숨기지 않는다.
