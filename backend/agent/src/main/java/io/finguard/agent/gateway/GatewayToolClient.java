@@ -75,7 +75,7 @@ public class GatewayToolClient {
                 || !hasExpectedFinancialResult(response.result(), request))) {
             return Mono.error(new GatewayCallException("GATEWAY_RESPONSE_INVALID"));
         }
-        if (response.decision() != PolicyDecision.ALLOW
+        if (!response.decision().runsTool()
                 && (response.reasonCodes().isEmpty()
                 || response.reasonCodes().stream().anyMatch(String::isBlank)
                 || (response.result() != null && !response.result().isNull()))) {

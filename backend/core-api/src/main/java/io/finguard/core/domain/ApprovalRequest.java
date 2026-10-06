@@ -2,7 +2,6 @@ package io.finguard.core.domain;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -103,33 +102,5 @@ public class ApprovalRequest {
         request.events.add(new ApprovalRequestEvent(
                 request, 1, ApprovalEventType.REQUESTED, requestedAt, ApprovalActorType.SYSTEM, null));
         return request;
-    }
-
-    public String getApprovalRequestId() {
-        return approvalRequestId;
-    }
-
-    public String getAuditEventId() {
-        return auditEventId;
-    }
-
-    public String getAgentRunId() {
-        return agentRunId;
-    }
-
-    public ApprovalStatus getStatus() {
-        return status;
-    }
-
-    public Set<String> getReasonCodes() {
-        return Collections.unmodifiableSet(reasonCodes);
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public List<ApprovalRequestEvent> getEvents() {
-        return Collections.unmodifiableList(events);
     }
 }

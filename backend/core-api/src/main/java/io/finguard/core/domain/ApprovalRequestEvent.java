@@ -66,24 +66,4 @@ public class ApprovalRequestEvent {
         this.actorType = actorType;
         this.actorId = actorId;
     }
-
-    public int getSequence() {
-        return sequence;
-    }
-
-    public ApprovalEventType getEventType() {
-        return eventType;
-    }
-
-    public Instant getOccurredAt() {
-        return occurredAt;
-    }
-
-    public ApprovalActorType getActorType() {
-        return actorType;
-    }
-
-    public String getActorId() {
-        return actorId;
-    }
 }

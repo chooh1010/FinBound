@@ -9,7 +9,6 @@ import org.springframework.web.client.RestClientException;
 
 import io.finguard.gateway.authorization.AuthorizationContext;
 import io.finguard.gateway.authorization.PolicyDecisionResult;
-import io.finguard.gateway.contract.PolicyDecision;
 import io.finguard.gateway.exception.OpaUnavailableException;
 
 @Component
@@ -42,7 +41,7 @@ public class OpaClient {
             if (result.decision() == null) {
                 throw new OpaUnavailableException("OPA returned no decision");
             }
-            if (result.decision() != PolicyDecision.ALLOW
+            if (!result.decision().runsTool()
                     && (result.reasonCodes() == null || result.reasonCodes().isEmpty())) {
                 throw new OpaUnavailableException("OPA returned a non-ALLOW decision without reasons");
             }
