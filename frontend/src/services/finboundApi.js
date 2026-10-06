@@ -7,7 +7,7 @@ const DEFAULT_TIMEOUT_MS = 8_000
 const DEFAULT_EXECUTION_POLL_INTERVAL_MS = 250
 const DEFAULT_EXECUTION_POLL_ATTEMPTS = 20
 const EXECUTION_STATUSES = new Set(['RUNNING', 'COMPLETED', 'FAILED'])
-const EXECUTION_TOOL_LABELS = {
+export const EXECUTION_TOOL_LABELS = {
   CREDIT_SCORE_READ: '신용정보 확인',
   INCOME_READ: '소득자료 확인',
   DEBT_READ: '부채자료 확인',
@@ -221,6 +221,43 @@ const APPROVAL_PENDING_REASON = 'AUDIT_APPROVAL_PENDING'
 const APPROVAL_REJECTED_REASON = 'AUDIT_APPROVAL_REJECTED'
 const APPROVAL_EXPIRED_REASON = 'AUDIT_APPROVAL_EXPIRED'
 
+// 승인 때문에 끝나지 않은 실행의 표시 상태. 앞에 있을수록 먼저 보인다 — 서비스와 화면이 이 순서 하나를 쓴다.
+const APPROVAL_DISPLAY_ORDER = ['PENDING', 'RERUNNABLE', 'USED_ELSEWHERE', 'REJECTED', 'EXPIRED']
+
+const APPROVAL_OUTCOMES = {
+  // 승인은 차단도 완료도 아니다. 해당 조회는 실행되지 않았고, 승인자의 판단을 기다린다.
+  PENDING: () => ({
+    title: '담당자 확인을 기다리는 조회가 있습니다',
+    message: '정책이 사람의 확인을 요구해 일부 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
+    extraItems: ['승인 대기 시도 있음'],
+    nextAction: '승인자가 승인하면 같은 요청을 다시 실행할 수 있습니다.',
+  }),
+  RERUNNABLE: (rerunApproval) => ({
+    title: '승인된 조회가 있습니다',
+    message: '승인자가 확인한 조회입니다. 같은 요청을 다시 실행해야 금융시스템을 조회합니다.',
+    extraItems: ['다시 실행 가능'],
+    nextAction: `승인 기한(${rerunApproval.validUntil}) 안에 같은 요청을 다시 실행해 주세요.`,
+  }),
+  USED_ELSEWHERE: () => ({
+    title: '승인된 조회는 다시 실행에서 진행했습니다',
+    message: '이 실행에서는 해당 조회를 하지 않았습니다. 승인을 사용한 다시 실행의 결과가 업무 결과입니다.',
+    extraItems: ['승인 사용됨'],
+    nextAction: '다시 실행한 업무의 결과를 확인해 주세요.',
+  }),
+  REJECTED: () => ({
+    title: '승인되지 않은 조회가 있습니다',
+    message: '승인자가 거절해 해당 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
+    extraItems: ['승인 거절 시도 있음'],
+    nextAction: '필요하면 업무 요청을 새로 실행해 주세요. 새 실행은 다시 판정됩니다.',
+  }),
+  EXPIRED: () => ({
+    title: '승인 기한이 지난 조회가 있습니다',
+    message: '처리 또는 사용 기한이 지나 해당 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
+    extraItems: ['승인 만료 시도 있음'],
+    nextAction: '필요하면 업무 요청을 새로 실행해 주세요. 새 실행은 다시 판정됩니다.',
+  }),
+}
+
 function hasExecutionReason(execution, code) {
   return Array.isArray(execution?.reasonCodes) && execution.reasonCodes.includes(code)
 }
@@ -361,12 +398,21 @@ function mapAgentExecution(agentRun, permission, execution) {
   // 이 실행의 승인을 나중 다시 실행이 썼다. 이 실행 자체는 해당 조회를 하지 않았으므로 완료로 보이면 안 된다.
   const approvalUsedElsewhere = approvals.some((approval) => approval.status === 'CONSUMED')
   const pendingApprovalCount = approvals.filter((approval) => approval.status === 'PENDING').length
+  const approvalFlags = {
+    PENDING: approvalPending,
+    RERUNNABLE: Boolean(rerunApproval),
+    USED_ELSEWHERE: approvalUsedElsewhere,
+    REJECTED: approvalRejected,
+    EXPIRED: approvalExpired || approvalLapsed,
+  }
   const approvalState = {
     approvalPending,
     approvalUsedElsewhere,
     pendingApprovalCount,
     approvalRejected,
-    approvalExpired: approvalExpired || approvalLapsed,
+    approvalExpired: approvalFlags.EXPIRED,
+    // 화면이 보일 승인 상태 하나. 없으면 승인 때문에 끝나지 않은 조회가 없다.
+    approvalDisplay: APPROVAL_DISPLAY_ORDER.find((state) => approvalFlags[state]) ?? null,
     approvals,
     rerunApproval,
   }
@@ -400,42 +446,8 @@ function mapAgentExecution(agentRun, permission, execution) {
         extraItems: ['결과 미확인 시도 있음', `실행 사유 ${executionReasonCodes.join(' · ')}`],
         nextAction: '업무 기록에서 결과 미확인 건을 확인한 뒤 진행해 주세요.',
       }
-    : approvalPending && !failed
-    ? {
-        // 승인은 차단도 완료도 아니다. 해당 조회는 실행되지 않았고, 승인자의 판단을 기다린다.
-        title: '담당자 확인을 기다리는 조회가 있습니다',
-        message: '정책이 사람의 확인을 요구해 일부 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
-        extraItems: ['승인 대기 시도 있음'],
-        nextAction: '승인자가 승인하면 같은 요청을 다시 실행할 수 있습니다.',
-      }
-    : rerunApproval && !failed
-    ? {
-        title: '승인된 조회가 있습니다',
-        message: '승인자가 확인한 조회입니다. 같은 요청을 다시 실행해야 금융시스템을 조회합니다.',
-        extraItems: ['다시 실행 가능'],
-        nextAction: `승인 기한(${rerunApproval.validUntil}) 안에 같은 요청을 다시 실행해 주세요.`,
-      }
-    : approvalUsedElsewhere && !failed
-    ? {
-        title: '승인된 조회는 다시 실행에서 진행했습니다',
-        message: '이 실행에서는 해당 조회를 하지 않았습니다. 승인을 사용한 다시 실행의 결과가 업무 결과입니다.',
-        extraItems: ['승인 사용됨'],
-        nextAction: '다시 실행한 업무의 결과를 확인해 주세요.',
-      }
-    : approvalRejected && !failed
-    ? {
-        title: '승인되지 않은 조회가 있습니다',
-        message: '승인자가 거절해 해당 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
-        extraItems: ['승인 거절 시도 있음'],
-        nextAction: '필요하면 업무 요청을 새로 실행해 주세요. 새 실행은 다시 판정됩니다.',
-      }
-    : approvalState.approvalExpired && !failed
-    ? {
-        title: '승인 기한이 지난 조회가 있습니다',
-        message: '처리 또는 사용 기한이 지나 해당 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
-        extraItems: ['승인 만료 시도 있음'],
-        nextAction: '필요하면 업무 요청을 새로 실행해 주세요. 새 실행은 다시 판정됩니다.',
-      }
+    : approvalState.approvalDisplay && !failed
+    ? APPROVAL_OUTCOMES[approvalState.approvalDisplay](rerunApproval)
     : {
         title: failed ? 'AI 업무 처리 중 오류가 발생했습니다' : 'AI 업무 처리가 완료되었습니다',
         message: failed

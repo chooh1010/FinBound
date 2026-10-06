@@ -3,6 +3,7 @@ package io.finguard.core.agentrun;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -77,7 +78,7 @@ public class AgentExecutionService {
                 approvalRequests.findByAgentRunIdOrderByCreatedAtAscApprovalRequestIdAsc(agentRunId);
         approvals.stream()
                 .map(approval -> APPROVAL_REASONS.get(approval.getStatus()))
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .forEach(reason -> reasonCodeSet.add(reason.name()));
         List<String> reasonCodes = List.copyOf(reasonCodeSet);
 

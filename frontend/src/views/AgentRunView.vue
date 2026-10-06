@@ -83,18 +83,22 @@ const booleanStatusLabel = (value, trueLabel, falseLabel) => {
   if (value === false) return falseLabel
   return '확인 불가'
 }
+const APPROVAL_STATE_LABELS = {
+  RERUNNABLE: '승인됨 · 다시 실행 필요',
+  USED_ELSEWHERE: '승인 사용됨 · 다시 실행 결과 확인',
+  REJECTED: '승인 거절',
+  EXPIRED: '승인 기한 지남',
+}
 const executionStateLabel = computed(() => {
   if (execution.value?.status === 'RUNNING') return '업무 실행 중'
   if (execution.value?.status === 'ERROR' || errorAttempts.value.length) return '업무 오류'
   if (execution.value?.outcomeUnknown) return '결과 미확인'
-  if (execution.value?.approvalPending) {
+  const approvalDisplay = execution.value?.approvalDisplay
+  if (approvalDisplay === 'PENDING') {
     // 지금 기다리는 승인 요청 수. 옛 Core처럼 목록이 없으면 판정 기록 수로 대신한다.
     return `승인 대기 ${execution.value.pendingApprovalCount || approvalAttempts.value.length}건`
   }
-  if (execution.value?.rerunApproval) return '승인됨 · 다시 실행 필요'
-  if (execution.value?.approvalUsedElsewhere) return '승인 사용됨 · 다시 실행 결과 확인'
-  if (execution.value?.approvalRejected) return '승인 거절'
-  if (execution.value?.approvalExpired) return '승인 기한 지남'
+  if (approvalDisplay) return APPROVAL_STATE_LABELS[approvalDisplay]
   return blockedAttempts.value.length ? `업무 완료 · 보호 ${blockedAttempts.value.length}건` : '업무 완료'
 })
 const isReviewReady = computed(() => Boolean(
@@ -103,13 +107,8 @@ const isReviewReady = computed(() => Boolean(
   && execution.value.status === 'COMPLETED'
   && errorAttempts.value.length === 0
   && !execution.value.outcomeUnknown
-  // 승인을 기다리거나, 승인됐지만 다시 실행하지 않았거나, 거절·만료된 조회는 실행되지 않았다.
-  // 자료 확인이 끝났다고 보이면 안 된다.
-  && !execution.value.approvalPending
-  && !execution.value.rerunApproval
-  && !execution.value.approvalUsedElsewhere
-  && !execution.value.approvalRejected
-  && !execution.value.approvalExpired
+  // 승인 때문에 실행되지 않은 조회가 있으면(대기·승인됨·다른 실행에서 사용·거절·만료) 자료 확인이 끝나지 않았다.
+  && !execution.value.approvalDisplay
   && !loading.value,
 ))
 

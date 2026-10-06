@@ -3,6 +3,7 @@ package io.finguard.core.domain;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -200,9 +201,7 @@ public class ApprovalRequest {
             TaskType runTaskType,
             String runInputHash,
             Instant now) {
-        boolean applicable = status == ApprovalStatus.APPROVED
-                && validUntil != null
-                && validUntil.isAfter(now)
+        boolean applicable = isApprovedAndValid(now)
                 && boundAgentRunId == null
                 && employeeId != null && employeeId.equals(operatorEmployeeId)
                 && targetConsumerId != null && targetConsumerId.equals(consumerId)
@@ -238,10 +237,7 @@ public class ApprovalRequest {
         if (status == ApprovalStatus.CONSUMED) {
             return sameCall && auditEventId.equals(consumedByAuditEventId);
         }
-        boolean applicable = status == ApprovalStatus.APPROVED
-                && validUntil != null
-                && validUntil.isAfter(now)
-                && sameCall;
+        boolean applicable = isApprovedAndValid(now) && sameCall;
         if (!applicable) {
             return false;
         }
@@ -250,6 +246,11 @@ public class ApprovalRequest {
         consumedAt = now;
         append(ApprovalEventType.CONSUMED, now, ApprovalActorType.SYSTEM, null, null);
         return true;
+    }
+
+    /** 승인됐고 사용 기한 안이다. 묶기와 사용이 같은 기준을 쓴다. */
+    private boolean isApprovedAndValid(Instant now) {
+        return status == ApprovalStatus.APPROVED && validUntil != null && validUntil.isAfter(now);
     }
 
     private void requireDecidable(String approverId, Instant now) {
@@ -310,7 +311,7 @@ public class ApprovalRequest {
     }
 
     public Set<String> getReasonCodes() {
-        return java.util.Collections.unmodifiableSet(reasonCodes);
+        return Collections.unmodifiableSet(reasonCodes);
     }
 
     public Instant getCreatedAt() {
@@ -338,6 +339,6 @@ public class ApprovalRequest {
     }
 
     public List<ApprovalRequestEvent> getEvents() {
-        return java.util.Collections.unmodifiableList(events);
+        return Collections.unmodifiableList(events);
     }
 }

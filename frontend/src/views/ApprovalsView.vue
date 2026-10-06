@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 
-import { finboundApi } from '../services/finboundApi'
+import { EXECUTION_TOOL_LABELS, finboundApi } from '../services/finboundApi'
 
 // Core가 받는 사유 목록(docs/04 §15.1). 자유 메모는 받지 않는다 — 감사 기록은 고칠 수 없어 붙여 넣은 민감정보가 남는다.
 const DECISION_REASONS = [
@@ -12,11 +12,6 @@ const DECISION_REASONS = [
   { value: 'OUTSIDE_TASK_SCOPE', label: '업무 범위 밖' },
   { value: 'OTHER', label: '기타' },
 ]
-const TOOL_LABELS = {
-  CREDIT_SCORE_READ: '신용정보 확인',
-  INCOME_READ: '소득자료 확인',
-  DEBT_READ: '부채자료 확인',
-}
 const DECISION_ERRORS = {
   APPROVAL_SELF_DECISION: '본인이 요청한 건은 승인하거나 거절할 수 없습니다.',
   APPROVAL_NOT_PENDING: '이미 처리됐거나 처리 기한이 지난 요청입니다. 목록을 새로 불러왔습니다.',
@@ -76,7 +71,7 @@ async function decide(approval, decision) {
   }
 }
 
-const toolLabel = (tool) => TOOL_LABELS[tool] ?? tool
+const toolLabel = (tool) => EXECUTION_TOOL_LABELS[tool] ?? tool
 const timeLabel = (value) => (value ? new Date(value).toLocaleString('ko-KR') : '미제공')
 </script>
 

@@ -272,9 +272,7 @@ class ApprovalConsumeTest {
     }
 
     private Run startRun() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set(HttpHeaders.AUTHORIZATION, "Bearer test-operator-credential");
+        HttpHeaders headers = operatorHeaders();
         ResponseEntity<JsonNode> response = restTemplate.exchange(
                 URI.create(base() + "/api/v1/agent-runs"),
                 HttpMethod.POST,
@@ -333,8 +331,7 @@ class ApprovalConsumeTest {
     }
 
     private ResponseEntity<JsonNode> execution(Run run) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.AUTHORIZATION, "Bearer test-operator-credential");
+        HttpHeaders headers = operatorHeaders();
         ResponseEntity<JsonNode> response = restTemplate.exchange(
                 URI.create(base() + "/api/v1/agent-runs/" + run.agentRunId() + "/execution"),
                 HttpMethod.GET,
@@ -394,6 +391,13 @@ class ApprovalConsumeTest {
                 HttpMethod.POST,
                 new HttpEntity<>(body, internalHeaders(verifiedAgentHeader)),
                 JsonNode.class);
+    }
+
+    private HttpHeaders operatorHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set(HttpHeaders.AUTHORIZATION, "Bearer test-operator-credential");
+        return headers;
     }
 
     private HttpHeaders internalHeaders(String verifiedAgentId) {

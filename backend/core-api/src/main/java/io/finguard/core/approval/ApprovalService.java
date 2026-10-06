@@ -2,7 +2,7 @@ package io.finguard.core.approval;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -57,25 +57,21 @@ public class ApprovalService {
 
     public ApprovalRequestView approve(
             String approvalRequestId, CoreApiPrincipal approver, ApprovalDecisionReason reason) {
-        return decide(approvalRequestId, request -> {
-            request.approve(approver.employeeId(), reason, approvalRequests.databaseNow(), properties.approvedTtl());
-            return request;
-        });
+        return decide(approvalRequestId, request -> request.approve(
+                approver.employeeId(), reason, approvalRequests.databaseNow(), properties.approvedTtl()));
     }
 
     public ApprovalRequestView reject(
             String approvalRequestId, CoreApiPrincipal approver, ApprovalDecisionReason reason) {
-        return decide(approvalRequestId, request -> {
-            request.reject(approver.employeeId(), reason, approvalRequests.databaseNow());
-            return request;
-        });
+        return decide(approvalRequestId, request ->
+                request.reject(approver.employeeId(), reason, approvalRequests.databaseNow()));
     }
 
-    private ApprovalRequestView decide(String approvalRequestId, Function<ApprovalRequest, ApprovalRequest> change) {
+    private ApprovalRequestView decide(String approvalRequestId, Consumer<ApprovalRequest> change) {
         ApprovalRequest request =
                 approvalRequests.findForUpdate(approvalRequestId).orElseThrow(ApprovalNotFoundException::new);
         try {
-            change.apply(request);
+            change.accept(request);
         } catch (ApprovalDecisionException exception) {
             throw switch (exception.getKind()) {
                 // 직무 분리 위반은 권한 거부다. 인증 경계 기록에도 남는다(docs/04 §2).
@@ -87,9 +83,8 @@ public class ApprovalService {
         }
         // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 그대로 flush한다 — 새 이벤트가 persist로 함께 들어간다.
         approvalRequests.flush();
-        ApprovalRequest saved = request;
-        String requestId = auditEvents.findById(saved.getAuditEventId()).map(AuditEvent::getRequestId).orElse(null);
-        return ApprovalRequestView.of(saved, requestId);
+        String requestId = auditEvents.findById(request.getAuditEventId()).map(AuditEvent::getRequestId).orElse(null);
+        return ApprovalRequestView.of(request, requestId);
     }
 
     private static ApprovalStatus parse(String status) {
