@@ -76,7 +76,8 @@ public class AgentRunController {
                         request.consumerId(),
                         request.taskType(),
                         prepared,
-                        request.scenario());
+                        request.scenario(),
+                        request.approvalRequestId());
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(

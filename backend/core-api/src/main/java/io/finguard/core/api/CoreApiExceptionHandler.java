@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import io.finguard.core.agentrun.AgentExecutionNotFoundException;
+import io.finguard.core.approval.ApprovalNotApplicableException;
 import io.finguard.core.approval.ApprovalNotFoundException;
 import io.finguard.core.approval.ApprovalNotPendingException;
 import io.finguard.core.approval.InvalidApprovalStatusException;
@@ -164,6 +165,12 @@ public class CoreApiExceptionHandler {
     @ExceptionHandler(ApprovalNotPendingException.class)
     public ResponseEntity<ProblemDetail> handleApprovalNotPending(ApprovalNotPendingException exception) {
         return problem(HttpStatus.CONFLICT, ReasonCode.APPROVAL_NOT_PENDING.name(), "이미 처리됐거나 기한이 지난 승인 요청입니다.");
+    }
+
+    @ExceptionHandler(ApprovalNotApplicableException.class)
+    public ResponseEntity<ProblemDetail> handleApprovalNotApplicable(ApprovalNotApplicableException exception) {
+        return problem(
+                HttpStatus.CONFLICT, ReasonCode.APPROVAL_NOT_APPLICABLE.name(), "이 실행에 쓸 수 없는 승인입니다.");
     }
 
     @ExceptionHandler(InvalidApprovalStatusException.class)

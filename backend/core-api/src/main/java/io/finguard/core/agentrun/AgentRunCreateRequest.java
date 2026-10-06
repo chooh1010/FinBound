@@ -19,7 +19,19 @@ public record AgentRunCreateRequest(
         // 여기서 막지 않으면 "성공했지만 반드시 막힐 실행"이 생긴다 — Detector가 평가하지
         // 못한 입력은 스냅샷이 NOT_EVALUATED로 남고 Gateway가 전부 fail-closed한다.
         @NotBlank @Size(max = 4096) String inputText,
-        AgentSimulationScenario scenario) {
+        AgentSimulationScenario scenario,
+        // 승인된 요청을 다시 실행할 때만 보낸다(docs/04 §3). 원래 요청과 같은지는 Core가 확인한다.
+        @Size(max = 64) String approvalRequestId) {
+
+    /** 승인 없이 실행하는 기존 호출자용. */
+    public AgentRunCreateRequest(
+            String employeeId,
+            String consumerId,
+            TaskType taskType,
+            String inputText,
+            AgentSimulationScenario scenario) {
+        this(employeeId, consumerId, taskType, inputText, scenario, null);
+    }
 
     /**
      * {@code scenario}는 선택이고 기본값은 {@link AgentSimulationScenario#NORMAL_CREDIT_SCORE}다.

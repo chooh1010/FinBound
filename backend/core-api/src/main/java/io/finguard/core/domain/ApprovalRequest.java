@@ -188,6 +188,34 @@ public class ApprovalRequest {
         return true;
     }
 
+    /**
+     * 승인을 지정한 다시 실행 하나에 묶는다. 요청한 직원·고객·업무 종류·입력이 원래 요청과 모두 같아야 한다 — 하나라도
+     * 다르면 다른 요청이다. 비어 있는 값(옛 요청)은 무엇과도 맞지 않는다. 도구·자료는 Agent가 실제로 부를 때 정해지므로
+     * 사용 시점에 다시 본다({@link #consume}).
+     */
+    public void bind(
+            String agentRunId,
+            String operatorEmployeeId,
+            String consumerId,
+            TaskType runTaskType,
+            String runInputHash,
+            Instant now) {
+        boolean applicable = status == ApprovalStatus.APPROVED
+                && validUntil != null
+                && validUntil.isAfter(now)
+                && boundAgentRunId == null
+                && employeeId != null && employeeId.equals(operatorEmployeeId)
+                && targetConsumerId != null && targetConsumerId.equals(consumerId)
+                && taskType != null && taskType == runTaskType
+                && inputHash != null && inputHash.equals(runInputHash);
+        if (!applicable) {
+            throw new ApprovalDecisionException(
+                    ApprovalDecisionException.Kind.NOT_APPLICABLE, "The approval cannot be used for this run");
+        }
+        boundAgentRunId = agentRunId;
+        append(ApprovalEventType.BOUND, now, ApprovalActorType.EMPLOYEE, operatorEmployeeId, null);
+    }
+
     private void requireDecidable(String approverId, Instant now) {
         if (approverId == null || approverId.equals(employeeId)) {
             throw new ApprovalDecisionException(
@@ -267,6 +295,10 @@ public class ApprovalRequest {
 
     public Instant getValidUntil() {
         return validUntil;
+    }
+
+    public String getBoundAgentRunId() {
+        return boundAgentRunId;
     }
 
     public List<ApprovalRequestEvent> getEvents() {

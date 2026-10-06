@@ -9,6 +9,8 @@ public class ApprovalDecisionException extends RuntimeException {
         SELF_DECISION,
         /** 이미 처리됐거나 기한이 지났다. */
         NOT_PENDING,
+        /** 다시 실행에 쓸 수 없다 — 승인되지 않았거나, 기한이 지났거나, 이미 묶였거나, 요청이 다르다. */
+        NOT_APPLICABLE,
     }
 
     private final Kind kind;

@@ -9,6 +9,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.finguard.core.approval.ApprovalBinding;
 import io.finguard.core.domain.AgentRun;
 import io.finguard.core.domain.AgentRunStatus;
 import io.finguard.core.domain.AgentSimulationScenario;
@@ -66,6 +67,7 @@ public class AgentRunService {
     private final SecuredAgentInputRepository securedInputs;
     private final PromptRiskSnapshotRepository promptRiskSnapshots;
     private final EffectivePermissionCalculator calculator;
+    private final ApprovalBinding approvalBinding;
     private final ApplicationEventPublisher events;
     private final Clock clock;
 
@@ -79,6 +81,7 @@ public class AgentRunService {
             SecuredAgentInputRepository securedInputs,
             PromptRiskSnapshotRepository promptRiskSnapshots,
             EffectivePermissionCalculator calculator,
+            ApprovalBinding approvalBinding,
             ApplicationEventPublisher events,
             Clock clock) {
         this.employeeAuthorities = employeeAuthorities;
@@ -90,8 +93,20 @@ public class AgentRunService {
         this.securedInputs = securedInputs;
         this.promptRiskSnapshots = promptRiskSnapshots;
         this.calculator = calculator;
+        this.approvalBinding = approvalBinding;
         this.events = events;
         this.clock = clock;
+    }
+
+    /** 승인 없이 실행한다. */
+    @Transactional
+    public AgentRunStarted start(
+            String employeeId,
+            String consumerId,
+            TaskType taskType,
+            PreparedAgentRun prepared,
+            AgentSimulationScenario scenario) {
+        return start(employeeId, consumerId, taskType, prepared, scenario, null);
     }
 
     @Transactional
@@ -100,7 +115,8 @@ public class AgentRunService {
             String consumerId,
             TaskType taskType,
             PreparedAgentRun prepared,
-            AgentSimulationScenario scenario) {
+            AgentSimulationScenario scenario,
+            String approvalRequestId) {
         Instant now = clock.instant();
 
         EmployeeAuthority authority =
@@ -185,6 +201,12 @@ public class AgentRunService {
         // contentLanguage 를 지어내지 않는다. 판별하지 않았으므로 비워 둔다 —
         // 감사 시스템에서 없는 사실을 만들어내는 것은 null 보다 나쁘다.
         securedInputs.save(new SecuredAgentInput(inputRef, agentRun.getAgentRunId(), inputHash, null, now));
+
+        // 승인된 요청을 다시 실행하면 그 승인을 이 실행에만 묶는다. 맞지 않으면 실행 전체가 롤백된다(docs/04 §3).
+        if (approvalRequestId != null) {
+            approvalBinding.bind(
+                    approvalRequestId, agentRun.getAgentRunId(), employeeId, consumerId, taskType, inputHash);
+        }
 
         // 같은 입력·같은 모델이면 기존 스냅샷을 재사용한다 — docs/06 §24.2.
         // Prompt Risk는 실행마다 새로 계산하는 값이 아니라 입력 버전에 붙은 스냅샷이다.

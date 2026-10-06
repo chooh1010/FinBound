@@ -81,7 +81,8 @@ public class ApprovalService {
                 // 직무 분리 위반은 권한 거부다. 인증 경계 기록에도 남는다(docs/04 §2).
                 case SELF_DECISION -> new CoreApiAccessDeniedException(
                         ReasonCode.APPROVAL_SELF_DECISION, "자기 요청은 승인하거나 거절할 수 없습니다.");
-                case NOT_PENDING -> new ApprovalNotPendingException();
+                // 승인·거절에서는 생기지 않는 사유다. 생겼다면 처리할 수 없는 상태라는 뜻이라 NOT_PENDING과 같이 다룬다.
+                case NOT_PENDING, NOT_APPLICABLE -> new ApprovalNotPendingException();
             };
         }
         // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 그대로 flush한다 — 새 이벤트가 persist로 함께 들어간다.
