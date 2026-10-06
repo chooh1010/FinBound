@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -508,7 +509,7 @@ class EntityMappingTest {
         // 이 변경 전에는 근거를 적어도 Case가 비어 있었다. 무엇과 대조할지 모르므로 받지 않는다.
         AuditEvent legacy = auditEventWithoutCase("AUD-902", "REQ-902");
         legacy.recordResolvedContext(resolvedContext("LOAN-2026-900", "PASS-900", new BigDecimal("0.0500")));
-        org.springframework.test.util.ReflectionTestUtils.setField(legacy, "caseId", null);
+        ReflectionTestUtils.setField(legacy, "caseId", null);
 
         assertThatThrownBy(
                         () ->

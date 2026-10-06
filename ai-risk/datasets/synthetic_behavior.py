@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.model_selection import GroupShuffleSplit
 
 from app.feature_builder import FEATURE_NAMES, build_feature_vector
+from app.feature_builder.behavior import BEHAVIOR_WINDOW
 from app.schemas.behavior import (
     CompletedBehaviorEvent,
     CurrentToolCallAttempt,
@@ -25,7 +26,6 @@ HARD_REQUEST_LIMIT_1M = 30
 BLOCK_BURST_SESSION_RATE = 0.08
 BLOCK_BURST_MAX_SIZE = 3
 MAX_BLOCKS_PER_WINDOW = 3
-BLOCK_WINDOW = timedelta(minutes=5)
 KST = timezone(timedelta(hours=9))
 TOOLS = tuple(FinancialTool)
 NORMAL_SCENARIOS = (
@@ -196,7 +196,7 @@ def _session_vectors(
         recent_blocks = sum(
             event.decision is Decision.BLOCK
             for event in history
-            if event.requested_at > current_time - BLOCK_WINDOW
+            if event.requested_at > current_time - BEHAVIOR_WINDOW
         )
         if recent_blocks >= MAX_BLOCKS_PER_WINDOW:
             decision = Decision.ALLOW

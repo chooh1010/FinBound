@@ -15,6 +15,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
@@ -31,18 +33,19 @@ import io.finguard.gateway.dto.ScopeStatus;
 import io.finguard.gateway.dto.ToolCallRequest;
 import io.finguard.gateway.exception.AiUnavailableException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class AiClientImplTest {
 
     private WireMockServer server;
     private AiClientImpl client;
-    private io.micrometer.core.instrument.simple.SimpleMeterRegistry meters;
+    private SimpleMeterRegistry meters;
 
     @BeforeEach
     void setUp() {
         server = new WireMockServer(WireMockConfiguration.options().dynamicPort());
         server.start();
-        meters = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        meters = new SimpleMeterRegistry();
         client = new AiClientImpl(server.baseUrl(), "internal-secret", 1_000, meters);
     }
 
@@ -191,7 +194,7 @@ class AiClientImplTest {
             VerifiedAgentIdentity.verified("LOAN-AGENT-01"), request, context, history,
             "REQ-4", "trace", Instant.parse("2026-08-17T12:00:00Z"));
 
-        com.fasterxml.jackson.databind.JsonNode events = new com.fasterxml.jackson.databind.ObjectMapper()
+        JsonNode events = new ObjectMapper()
             .readTree(server.getAllServeEvents().getFirst().getRequest().getBodyAsString())
             .get("history");
         // 실행 실패는 false로, BLOCK은 값 없음(null)으로 간다. BLOCK을 false로 채우면 실패로 세진다.
