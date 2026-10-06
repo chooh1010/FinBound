@@ -205,7 +205,8 @@ public class ToolCallEnforcementService {
             systemFailure ? null : outcome.severity(),
             systemFailure ? null : outcome.riskFlagged(),
             outcome.policyVersion(),
-            completedAt);
+            completedAt,
+            systemFailure ? null : outcome.policyInput());
     }
 
     private AuditOutcome allowOutcome(AuthorizationOutcome outcome, Instant completedAt, long latencyMs) {
@@ -223,7 +224,8 @@ public class ToolCallEnforcementService {
             outcome.severity(),
             outcome.riskFlagged(),
             outcome.policyVersion(),
-            completedAt);
+            completedAt,
+            outcome.policyInput());
     }
 
     private AuditOutcome downstreamErrorOutcome(AuthorizationOutcome outcome,
@@ -244,7 +246,8 @@ public class ToolCallEnforcementService {
             outcome.severity(),
             outcome.riskFlagged(),
             outcome.policyVersion(),
-            completedAt);
+            completedAt,
+            outcome.policyInput());
     }
 
     private void safeUpdateOutcome(VerifiedAgentIdentity identity,

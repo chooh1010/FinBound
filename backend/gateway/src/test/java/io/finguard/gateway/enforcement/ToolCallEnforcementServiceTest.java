@@ -33,6 +33,7 @@ import io.finguard.gateway.contract.PolicyDecision;
 import io.finguard.gateway.dto.AuditOutcome;
 import io.finguard.gateway.dto.AuditStart;
 import io.finguard.gateway.dto.DownstreamToolResult;
+import io.finguard.gateway.dto.PolicyInputSnapshot;
 import io.finguard.gateway.dto.ToolCallRequest;
 import io.finguard.gateway.exception.AuditWriteException;
 import io.finguard.gateway.exception.DownstreamTimeoutException;
@@ -165,6 +166,8 @@ class ToolCallEnforcementServiceTest {
 
         AuditOutcome outcome = captureOutcome("REQ-2");
         assertThat(outcome.decision()).isEqualTo(PolicyDecision.BLOCK);
+        // 테스트의 AuthorizationOutcome은 판정 입력 없이 만들었다 — 있는 그대로 전달한다.
+        assertThat(outcome.policyInput()).isNull();
         assertThat(outcome.severity()).isEqualTo("CRITICAL");
         assertThat(outcome.riskFlagged()).isTrue();
         assertThat(outcome.systemOutcome()).isEqualTo("COMPLETED");
@@ -195,6 +198,34 @@ class ToolCallEnforcementServiceTest {
         assertThat(outcome.riskFlagged()).isNull();
         assertThat(outcome.downstreamReached()).isFalse();
         assertThat(outcome.responseReleased()).isFalse();
+    }
+
+    /** 판정에 닿은 결과는 판정 입력 스냅샷을 Core로 넘긴다 — ALLOW 완료와 downstream 오류 모두. */
+    @Test
+    void decidedOutcomesForwardThePolicyInputSnapshot() {
+        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("ALERT", false, false);
+        when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
+            new AuthorizationOutcome(
+                new PolicyDecisionResult(PolicyDecision.ALLOW, "MEDIUM", false, List.of(), "policy-1"),
+                0.40,
+                snapshot));
+        when(downstreamClient.execute(any(), any(), any())).thenReturn(
+            new DownstreamToolResult("REQ-6", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+                Map.of("creditScore", 812)));
+
+        service.enforce(identity, request, "REQ-6", "trace");
+
+        assertThat(captureOutcome("REQ-6").policyInput()).isEqualTo(snapshot);
+    }
+
+    @Test
+    void failClosedSendsNoPolicyInput() {
+        when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
+            AuthorizationOutcome.failClosed("POLICY_ENGINE_UNAVAILABLE"));
+
+        service.enforce(identity, request, "REQ-7", "trace");
+
+        assertThat(captureOutcome("REQ-7").policyInput()).isNull();
     }
 
     @Test
