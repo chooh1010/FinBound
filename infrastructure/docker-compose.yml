@@ -72,6 +72,9 @@ services:
       # 로컬 데모용 환경 변수다 — 운영에서는 다른 Credential처럼 secret으로 옮긴다.
       FINGUARD_API_APPROVERCREDENTIAL: ${APPROVER_CREDENTIAL:-}
       FINGUARD_API_APPROVEREMPLOYEEID: ${APPROVER_EMPLOYEE_ID:-}
+      # 묶인 승인을 Context Resolve에서 쓴다(docs/04 §7). Core → Gateway → loan-review-policy-4를 올린 뒤에 켠다 —
+      # 먼저 켜면 옛 정책이 승인을 무시하는 동안 승인만 소진된다.
+      APPROVAL_CONSUME_ENABLED: ${APPROVAL_CONSUME_ENABLED:-false}
       AGENT_URL: http://agent:8082
       AGENT_READ_TIMEOUT_MS: ${AGENT_READ_TIMEOUT_MS:-15000}
       # 기본은 프로파일 없음 = 데모 시드를 넣지 않는다.
