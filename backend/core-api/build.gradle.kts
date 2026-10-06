@@ -21,4 +21,13 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
+    // 기록한 이벤트를 계약(contracts/events)으로 검증한다. backend:audit와 같은 버전이다.
+    testImplementation("com.networknt:json-schema-validator:2.0.4") {
+        // JSON만 검증한다. yaml 모듈은 Spring Boot가 다른 버전으로 올려 의존성 검증 목록 밖으로 나간다.
+        exclude(group = "com.fasterxml.jackson.dataformat", module = "jackson-dataformat-yaml")
+    }
+}
+
+tasks.test {
+    systemProperty("finguard.repository.root", rootProject.projectDir.absolutePath)
 }

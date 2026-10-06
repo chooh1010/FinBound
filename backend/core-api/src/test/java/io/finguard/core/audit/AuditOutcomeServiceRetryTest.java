@@ -29,6 +29,7 @@ import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.domain.Severity;
 import io.finguard.core.domain.Tool;
+import io.finguard.core.event.EventRecorder;
 import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.finguard.core.repository.SecuredAgentInputRepository;
@@ -55,6 +56,7 @@ class AuditOutcomeServiceRetryTest {
                     mock(TaskPassportRepository.class),
                     mock(SecuredAgentInputRepository.class),
                     new ApprovalProperties(Duration.ofMinutes(30), Duration.ofMinutes(15)),
+                    mock(EventRecorder.class),
                     mock(PlatformTransactionManager.class),
                     Clock.fixed(NOW, ZoneOffset.UTC),
                     new SimpleMeterRegistry());

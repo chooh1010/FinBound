@@ -14,6 +14,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
+import io.finguard.core.event.EventRecorder;
+import io.finguard.core.event.EventType;
 import io.finguard.core.repository.AuditEventRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -39,6 +41,7 @@ public class OutcomeReconciler {
     private static final double MILLIS_PER_SECOND = 1000.0;
 
     private final AuditEventRepository auditEvents;
+    private final EventRecorder events;
     private final TransactionTemplate rowTransaction;
     private final OutcomeReconciliationProperties properties;
     private final Clock clock;
@@ -47,11 +50,13 @@ public class OutcomeReconciler {
 
     public OutcomeReconciler(
             AuditEventRepository auditEvents,
+            EventRecorder events,
             PlatformTransactionManager transactionManager,
             OutcomeReconciliationProperties properties,
             Clock clock,
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
+        this.events = events;
         this.rowTransaction = new TransactionTemplate(transactionManager);
         // 행마다 독립 커밋이어야 한다. 바깥 트랜잭션에 합류하면 행별 커밋·실패 격리가 깨진다.
         this.rowTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -91,7 +96,10 @@ public class OutcomeReconciler {
                     return null;
                 }
                 event.markOutcomeUnknown(clock.instant());
-                return auditEvents.saveAndFlush(event);
+                AuditEvent unknown = auditEvents.saveAndFlush(event);
+                // 같은 행 트랜잭션이다. 이벤트 기록이 실패하면 표시도 롤백되고 다음 주기에 다시 본다.
+                events.recordToolCall(EventType.TOOL_CALL_OUTCOME_UNKNOWN, unknown);
+                return unknown;
             });
         } catch (ObjectOptimisticLockingFailureException exception) {
             // 같은 행에 결과가 막 반영됐다. 그쪽이 이겼고, 이 배치가 할 일은 없다.

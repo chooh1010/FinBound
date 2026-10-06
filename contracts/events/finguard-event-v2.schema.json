@@ -484,6 +484,7 @@
           "type": "boolean"
         },
         "policyVersion": {
+          "$comment": "Optional: Core does not require it with a decision (AuditOutcomeRequest).",
           "$ref": "#/$defs/nonEmptyIdentifier"
         },
         "approvalRequestId": {
@@ -538,11 +539,6 @@
                 {
                   "required": [
                     "riskFlagged"
-                  ]
-                },
-                {
-                  "required": [
-                    "policyVersion"
                   ]
                 }
               ]
@@ -605,8 +601,7 @@
         ],
         "decision": [
           "severity",
-          "riskFlagged",
-          "policyVersion"
+          "riskFlagged"
         ]
       }
     },
