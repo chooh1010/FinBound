@@ -273,7 +273,7 @@ BUT
 행동 패턴이 정상 분포에서 극단적으로 이탈
 
 → Isolation Forest Critical
-→ BLOCK (loan-review-policy-2에서는 보류: ALLOW + riskFlagged, 아래 §AI Critical Block 참고)
+→ APPROVAL (loan-review-policy-3: 실행하지 않고 사람의 확인을 기다림, 아래 §AI Critical Block 참고)
 ```
 
 ### 알고리즘

@@ -279,10 +279,9 @@ CRITICAL
 
 `behaviorRisk`는 공격 확률이라고 표현하지 않는다.
 
-> **`loan-review-policy-2`부터 행동 CRITICAL만으로는 차단하지 않는다.** Isolation Forest 점수는 극단에서
-> 포화돼 업무시간 빠른 반복과 야간 누적을 안정적으로 가르지 못한다(같은 학습 코드에서 시드에 따라 빠른 반복의
-> CRITICAL 비율이 0%~62.5%). 심각도를 다시 설계할 때까지 행동 CRITICAL은 ALERT처럼 `riskFlagged=true`로
-> 허용하고, `BEHAVIOR_ANOMALY`는 예약 코드로 둔다. 근거: `ai-risk/models/behavior_iforest_model_card.md`.
+> **행동 CRITICAL만으로는 차단하지 않는다.** Isolation Forest 점수는 극단에서 포화돼 업무시간 빠른 반복과
+> 야간 누적을 안정적으로 가르지 못한다(같은 학습 코드에서 시드에 따라 빠른 반복의 CRITICAL 비율이 0%~62.5%).
+> `loan-review-policy-2`는 이를 ALERT처럼 `riskFlagged=true`로 허용했다. 근거: `ai-risk/models/behavior_iforest_model_card.md`.
 >
 > **`loan-review-policy-3`에서는 행동 CRITICAL(다른 차단 사유 없음)이 `APPROVAL`이 된다**(§11). 자동 차단도
 > 그대로 허용도 아닌 사람의 확인이다. 사유 코드는 `BEHAVIOR_ANOMALY`.

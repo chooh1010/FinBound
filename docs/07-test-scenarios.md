@@ -307,8 +307,9 @@ Then:
 
 ```text
 BEHAVIOR_ANOMALY
-BLOCK
+APPROVAL (loan-review-policy-3, HTTP 202)
 Downstream 0회
+승인 요청 PENDING
 ```
 
 Rule Only 비교 시 ALLOW, FinGuard + AI에서 BLOCK되는 인과관계를 보여준다.

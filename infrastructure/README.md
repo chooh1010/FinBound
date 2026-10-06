@@ -180,7 +180,7 @@ PR·`main`·`develop` Push에서 자동 실행하며, 수동 실행은 `full_sta
 실제 브라우저 연결과 Core→Agent→Gateway→AI→OPA→Mock Finance 흐름을 검사합니다.
 정상 ALLOW, 범위 BLOCK, Prompt Risk BLOCK, AI 중단 fail-closed와 downstream 미도달,
 인증 실패의 SecurityAuthEvent 격리, 동일 Prompt Snapshot 재사용, 실제 AI Behavior CRITICAL의
-OPA 차단, 브라우저 저장소·정적 번들·서비스 로그의 Credential/원문/금융 응답 비노출을 검증합니다.
+OPA 승인 요구(APPROVAL), 브라우저 저장소·정적 번들·서비스 로그의 Credential/원문/금융 응답 비노출을 검증합니다.
 테스트 Credential은 매번 무작위로 만들며 종료 시 해당 프로젝트와 DB 볼륨만 삭제합니다.
 
 ## 업무 E2E 범위
