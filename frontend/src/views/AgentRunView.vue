@@ -61,18 +61,21 @@ const permissionListLabel = (values) => (
 )
 const allowedAttempts = computed(() => execution.value?.attempts.filter((attempt) => attempt.decision === 'ALLOW' && attempt.systemOutcome !== 'ERROR') ?? [])
 const blockedAttempts = computed(() => execution.value?.attempts.filter((attempt) => attempt.decision === 'BLOCK' && attempt.systemOutcome !== 'ERROR') ?? [])
+const approvalAttempts = computed(() => execution.value?.attempts.filter((attempt) => attempt.decision === 'APPROVAL' && attempt.systemOutcome !== 'ERROR') ?? [])
 const errorAttempts = computed(() => execution.value?.attempts.filter((attempt) => attempt.systemOutcome === 'ERROR') ?? [])
 const attemptDisplayOutcome = (attempt) => attempt.systemOutcome === 'ERROR' ? 'ERROR' : (attempt.decision ?? 'UNKNOWN')
 const attemptStatusLabel = (attempt) => {
   if (attempt.systemOutcome === 'ERROR') return '처리 오류'
   if (attempt.decision === 'ALLOW') return '확인 완료'
   if (attempt.decision === 'BLOCK') return '조회 차단'
+  if (attempt.decision === 'APPROVAL') return '승인 대기'
   return '결과 미제공'
 }
 const attemptScopeLabel = (attempt) => {
   if (attempt.systemOutcome === 'ERROR') return '시스템 처리 오류'
   if (attempt.decision === 'ALLOW') return '현재 업무에 필요'
   if (attempt.decision === 'BLOCK') return '현재 업무 범위 밖'
+  if (attempt.decision === 'APPROVAL') return '담당자 확인 필요'
   return '업무 범위 확인 불가'
 }
 const booleanStatusLabel = (value, trueLabel, falseLabel) => {
@@ -84,6 +87,7 @@ const executionStateLabel = computed(() => {
   if (execution.value?.status === 'RUNNING') return '업무 실행 중'
   if (execution.value?.status === 'ERROR' || errorAttempts.value.length) return '업무 오류'
   if (execution.value?.outcomeUnknown) return '결과 미확인'
+  if (execution.value?.approvalPending || approvalAttempts.value.length) return `승인 대기 ${approvalAttempts.value.length}건`
   return blockedAttempts.value.length ? `업무 완료 · 보호 ${blockedAttempts.value.length}건` : '업무 완료'
 })
 const isReviewReady = computed(() => Boolean(
@@ -92,6 +96,9 @@ const isReviewReady = computed(() => Boolean(
   && execution.value.status === 'COMPLETED'
   && errorAttempts.value.length === 0
   && !execution.value.outcomeUnknown
+  // 승인을 기다리는 조회는 실행되지 않았다. 자료 확인이 끝났다고 보이면 안 된다.
+  && !execution.value.approvalPending
+  && approvalAttempts.value.length === 0
   && !loading.value,
 ))
 
@@ -271,7 +278,7 @@ async function runAgentTask() {
 
         <div class="execution-content">
           <div class="work-progress">
-            <div class="attempt-heading"><div><p class="section-kicker">AI가 시도한 작업</p><h3>자료별 접근 결과</h3></div><span>{{ execution.status === 'RUNNING' ? '실행 결과 대기 중' : `${allowedAttempts.length}건 확인 · ${blockedAttempts.length}건 차단 · ${errorAttempts.length}건 오류` }}</span></div>
+            <div class="attempt-heading"><div><p class="section-kicker">AI가 시도한 작업</p><h3>자료별 접근 결과</h3></div><span>{{ execution.status === 'RUNNING' ? '실행 결과 대기 중' : `${allowedAttempts.length}건 확인 · ${blockedAttempts.length}건 차단 · ${approvalAttempts.length ? `${approvalAttempts.length}건 승인 대기 · ` : ''}${errorAttempts.length}건 오류` }}</span></div>
             <p v-if="execution.status === 'RUNNING'" class="no-results">AgentRun이 생성되었습니다. Tool Call 결과는 감사 현황에서 확인할 수 있습니다.</p>
             <ol class="attempt-list" aria-label="AI 자료 접근 결과">
               <li v-for="attempt in execution.attempts" :key="attempt.requestId" :class="attemptDisplayOutcome(attempt).toLowerCase()">

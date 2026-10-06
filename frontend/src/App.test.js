@@ -541,8 +541,8 @@ describe('FinBound P0 application', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('안전 현황 요약을 불러오지 못했습니다')
-    // 전체·정상·차단·오류·결과 미확인 다섯 칸 모두 값 대신 자리표시가 남는다.
-    expect(wrapper.findAll('.metric-grid strong').map((node) => node.text())).toEqual(['—', '—', '—', '—', '—'])
+    // 전체·정상·차단·오류·승인 필요·결과 미확인 여섯 칸 모두 값 대신 자리표시가 남는다.
+    expect(wrapper.findAll('.metric-grid strong').map((node) => node.text())).toEqual(['—', '—', '—', '—', '—', '—'])
     expect(wrapper.findAll('.event-row').length).toBeGreaterThan(0)
     expect(wrapper.text()).not.toContain('안전 현황 요약을 불러오지 못했습니다. 연결 상태와 조회 권한을 확인해 주세요.0')
   })

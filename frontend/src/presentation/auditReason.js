@@ -7,8 +7,16 @@ const reasonDescriptions = {
   DOWNSTREAM_ERROR: '금융시스템 처리 중 오류가 발생해 결과를 직원에게 제공하지 못했습니다.',
 }
 
+// 같은 사유라도 판정에 따라 일어난 일이 다르다. APPROVAL은 차단이 아니라 실행 보류다.
+const approvalDescriptions = {
+  BEHAVIOR_ANOMALY: '평소 업무 흐름과 다른 AI 행동이 확인되어 실행하지 않고 담당자 확인을 기다립니다.',
+}
+
 export function describeAuditReason(event) {
   const reasonCode = event?.reasonCodes?.[0]
+  if (event?.decision === 'APPROVAL') {
+    return approvalDescriptions[reasonCode] ?? '담당자 확인이 필요해 실행하지 않았습니다.'
+  }
   if (reasonCode && reasonDescriptions[reasonCode]) return reasonDescriptions[reasonCode]
   if (reasonCode) return '처리 사유 설명이 제공되지 않았습니다.'
   if (event?.auditStatus === 'ERROR' || event?.decision === 'BLOCK') return '처리 사유를 확인할 수 없습니다.'

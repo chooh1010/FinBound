@@ -35,6 +35,7 @@ const filters = ref({
 const decisionLabels = {
   ALLOW: '정상 처리',
   BLOCK: '차단',
+  APPROVAL: '승인 필요',
   ERROR: '오류',
   PROCESSING: '처리 중',
   OUTCOME_UNKNOWN: '결과 미확인',
@@ -239,6 +240,7 @@ watch(page, () => {
         <article class="metric-success"><span class="metric-icon" aria-hidden="true"><svg class="soft-shield-icon" viewBox="0 0 24 24"><path class="shield-fill" d="M12 2.7c2.35 1.45 4.75 2.35 7.2 2.9v5.15c0 4.75-2.8 8.4-7.2 10.55-4.4-2.15-7.2-5.8-7.2-10.55V5.6c2.45-.55 4.85-1.45 7.2-2.9Z" /><path class="shield-symbol" d="m8.5 12 2.25 2.25 4.8-5" /></svg></span><div><span>정상 처리</span><strong class="metric-allow">{{ summaryMetric('allow') }}</strong><small>업무 범위 안에서 완료</small></div></article>
         <article class="metric-protected"><span class="metric-icon" aria-hidden="true"><svg class="soft-shield-icon" viewBox="0 0 24 24"><path class="shield-fill" d="M12 2.7c2.35 1.45 4.75 2.35 7.2 2.9v5.15c0 4.75-2.8 8.4-7.2 10.55-4.4-2.15-7.2-5.8-7.2-10.55V5.6c2.45-.55 4.85-1.45 7.2-2.9Z" /><path class="shield-symbol" d="M9 9l6 6M15 9l-6 6" /></svg></span><div><span>안전 차단</span><strong class="metric-block">{{ summaryMetric('block') }}</strong><small>금융시스템 조회 전 중단</small></div></article>
         <article class="metric-warning"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 21 20H3L12 3Z" /><path d="M12 9v5M12 17h.01" /></svg></span><div><span>처리 오류</span><strong class="metric-error">{{ summaryMetric('error') }}</strong><small>확인 또는 재처리 필요</small></div></article>
+        <article class="metric-warning metric-approval"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" /></svg></span><div><span>승인 필요</span><strong class="metric-error">{{ summaryMetric('approval') }}</strong><small>담당자 확인 전 실행 보류</small></div></article>
         <article class="metric-warning metric-outcome-unknown"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4M12 17h.01" /></svg></span><div><span>결과 미확인</span><strong class="metric-error">{{ summaryMetric('outcomeUnknown') }}</strong><small>결과 기록 누락 확인 필요</small></div></article>
       </div>
 
@@ -264,6 +266,7 @@ watch(page, () => {
             <option value="ALL">전체</option>
             <option value="ALLOW">정상 처리</option>
             <option value="BLOCK">차단</option>
+            <option value="APPROVAL">승인 필요</option>
             <option value="ERROR">오류</option>
           </select>
         </label>

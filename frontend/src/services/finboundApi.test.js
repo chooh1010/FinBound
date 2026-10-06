@@ -368,6 +368,45 @@ describe('real Core API adapter', () => {
     expect(result.resultItems).toContain('결과 미확인 시도 있음')
   })
 
+  it('shows an approval attempt as waiting, not as a completed or blocked lookup', async () => {
+    // APPROVAL은 실행하지 않은 판정이다. Core는 COMPLETED 시도와 실행 사유 AUDIT_APPROVAL_PENDING으로 보낸다(docs/04 §3).
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-APPROVAL', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-APPROVAL',
+        status: 'COMPLETED',
+        reasonCodes: ['AUDIT_APPROVAL_PENDING', 'BEHAVIOR_ANOMALY'],
+        attempts: [{
+          requestId: 'REQ-APPROVAL',
+          requestedTool: 'CREDIT_SCORE_READ',
+          targetConsumerId: 'CUST-1001',
+          requestedData: ['CREDIT_SCORE'],
+          decision: 'APPROVAL',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['BEHAVIOR_ANOMALY'],
+          downstreamReached: false,
+          responseReleased: false,
+          requestedAt: '2026-10-06T12:00:00Z',
+          completedAt: '2026-10-06T12:00:01Z',
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.approvalPending).toBe(true)
+    expect(result.title).toBe('담당자 확인을 기다리는 조회가 있습니다')
+    expect(result.resultItems).toContain('승인 대기 1건')
+    expect(result.resultItems).toContain('안전 차단 0건')
+    expect(result.resultItems).toContain('정상 확인 0건')
+    expect(result.attempts[0].description).toContain('담당자 확인')
+    expect(result.attempts[0].description).not.toContain('차단')
+  })
+
   it.each([
     ['attempts are missing', { reasonCodes: ['AUDIT_OUTCOME_UNKNOWN'] }],
     ['a reason code is not a string', { reasonCodes: ['AUDIT_OUTCOME_UNKNOWN', null], attempts: [] }],

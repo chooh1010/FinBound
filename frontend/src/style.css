@@ -191,6 +191,11 @@ dd { margin: 5px 0 0; color: #26334b; font-size: .75rem; font-weight: 650; }
 .attempt-list li.block::before { display: none; }
 .attempt-decision { align-self: start; padding: 5px 7px; border-radius: 5px; color: #08705a; background: #e2f4ee; font-size: .55rem; font-weight: 750; white-space: nowrap; }
 .attempt-list li.block .attempt-decision { color: #ad2d3c; background: #ffe3e7; }
+/* 승인 대기: 차단도 완료도 아니다. 성공 색을 물려받지 않게 따로 둔다. */
+.work-progress li.approval .timeline-marker { background: var(--amber); }
+.attempt-list li.approval { margin: 1px -9px 0; padding: 10px 9px; border: 1px solid #eeddbd; border-radius: 8px; background: #fffaf0; }
+.attempt-list li.approval::before { display: none; }
+.attempt-list li.approval .attempt-decision { color: #8b510e; background: #fff2d9; }
 .attempt-details { margin-top: 8px; }
 .attempt-details summary { width: fit-content; color: #758397; font-size: .55rem; cursor: pointer; }
 .attempt-details dl { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 13px; margin: 9px 0 0; }
@@ -209,7 +214,8 @@ dd { margin: 5px 0 0; color: #26334b; font-size: .75rem; font-weight: 650; }
 .dashboard-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .dashboard-intro h2 { font-size: 1.3rem; }.dashboard-intro p:last-child { margin: 6px 0 0; color: var(--muted); font-size: .68rem; }
 .dashboard-update { display: inline-flex; align-items: center; gap: 7px; color: #64738a; font-size: .62rem; }.dashboard-update i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 11px; margin-bottom: 17px; }
+.metric-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 11px; margin-bottom: 17px; }
+@media (max-width: 1220px) { .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .metric-grid article { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 6px 18px rgba(37,57,88,.04); }
 .metric-grid span, .metric-grid small { display: block; color: var(--muted); font-size: .61rem; }.metric-grid strong { display: block; margin: 7px 0 4px; color: #26344b; font-size: 1.55rem; }.metric-grid .metric-allow { color: var(--green); }.metric-grid .metric-block { color: var(--red); }.metric-grid .metric-error { color: var(--amber); }
 .dashboard-filters { margin-bottom: 17px; overflow: hidden; }
@@ -389,7 +395,7 @@ main { background: transparent; }
   color: #9f3d3d;
   background: var(--red-soft);
 }
-.status-error, .status-high, .status-alert, .status-outcome_unknown {
+.status-error, .status-high, .status-alert, .status-outcome_unknown, .status-approval {
   border-color: rgba(161, 92, 11, .14);
   color: #8b510e;
   background: var(--amber-soft);
