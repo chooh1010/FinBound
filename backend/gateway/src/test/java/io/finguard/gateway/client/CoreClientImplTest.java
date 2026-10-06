@@ -191,13 +191,18 @@ class CoreClientImplTest {
             "CRITICAL",
             true,
             "policy-1",
-            Instant.now());
+            Instant.now(),
+            new io.finguard.gateway.dto.PolicyInputSnapshot("ALERT", true, false));
 
         client.updateAuditOutcome(identity, "REQ-1", outcome, "trace");
 
         assertThat(server.getAllServeEvents()).hasSize(1);
+        // Core의 PolicyInputRequest와 같은 JSON 필드 이름이어야 한다(docs/04 §11).
         server.verify(patchRequestedFor(urlEqualTo("/internal/v1/audits/REQ-1/outcome"))
             .withRequestBody(matchingJsonPath("$.severity", equalTo("CRITICAL")))
-            .withRequestBody(matchingJsonPath("$.riskFlagged", equalTo("true"))));
+            .withRequestBody(matchingJsonPath("$.riskFlagged", equalTo("true")))
+            .withRequestBody(matchingJsonPath("$.policyInput.behaviorRiskLevel", equalTo("ALERT")))
+            .withRequestBody(matchingJsonPath("$.policyInput.behaviorAnomalyDetected", equalTo("true")))
+            .withRequestBody(matchingJsonPath("$.policyInput.hardRequestLimitExceeded", equalTo("false"))));
     }
 }

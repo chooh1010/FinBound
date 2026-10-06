@@ -10,6 +10,7 @@ import io.finguard.gateway.client.OpaClient;
 import io.finguard.gateway.dto.BehaviorHistory;
 import io.finguard.gateway.dto.BehaviorRiskResult;
 import io.finguard.gateway.dto.HardLimits;
+import io.finguard.gateway.dto.PolicyInputSnapshot;
 import io.finguard.gateway.dto.PromptRiskSnapshot;
 import io.finguard.gateway.dto.ResolvedContext;
 import io.finguard.gateway.dto.RiskInput;
@@ -56,7 +57,7 @@ public class AuthorizationService {
                 riskInput(promptRisk, behavior),
                 new HardLimits(hardLimitService.isExceeded(identity.agentId())));
             PolicyDecisionResult decision = opaClient.decide(context);
-            return new AuthorizationOutcome(decision, behavior.behaviorRisk());
+            return new AuthorizationOutcome(decision, behavior.behaviorRisk(), PolicyInputSnapshot.from(context));
         } catch (CoreUnavailableException e) {
             return failClosed("CONTEXT_SERVICE_UNAVAILABLE", requestId, e);
         } catch (BehaviorHistoryUnavailableException e) {

@@ -25,6 +25,7 @@ import io.finguard.gateway.contract.FinancialTool;
 import io.finguard.gateway.contract.PolicyDecision;
 import io.finguard.gateway.dto.BehaviorHistory;
 import io.finguard.gateway.dto.BehaviorRiskResult;
+import io.finguard.gateway.dto.PolicyInputSnapshot;
 import io.finguard.gateway.dto.PromptRiskSnapshot;
 import io.finguard.gateway.dto.ResolvedContext;
 import io.finguard.gateway.dto.ScopeStatus;
@@ -59,6 +60,8 @@ class AuthorizationServiceTest {
         assertThat(outcome.isAllow()).isFalse();
         assertThat(outcome.reasonCodes()).containsExactly("CONTEXT_SERVICE_UNAVAILABLE");
         assertThat(outcome.behaviorRisk()).isNull();
+        // 판정에 닿지 못했다. 판정 입력을 지어내지 않는다.
+        assertThat(outcome.policyInput()).isNull();
     }
 
     @Test
@@ -154,6 +157,32 @@ class AuthorizationServiceTest {
         assertThat(context.getValue().risk().promptRisk()).isEqualTo(0.05);
         assertThat(context.getValue().risk().promptRiskLevel()).isEqualTo("LOW");
         assertThat(context.getValue().risk().behaviorRisk()).isEqualTo(0.10);
+    }
+
+    /**
+     * OPA에 보낸 입력 중 Core 감사에 없던 값(행동 위험 등급·이상 여부·요청 한도 초과)을 그대로 넘긴다.
+     * 정책 변경 재평가가 이 값으로 같은 판정을 재현해야 하므로, OPA 입력과 한 값이라도 다르면 안 된다.
+     */
+    @Test
+    void decidedOutcomeCarriesThePolicyInputItWasDecidedOn() {
+        when(core.resolveContext(any(), any(), any(), any())).thenReturn(resolvedContext());
+        when(core.behaviorHistory(any(), any(), any(), any()))
+            .thenReturn(new BehaviorHistory("LOAN-AGENT-01", "5m", List.of()));
+        when(ai.evaluateBehavior(any(), any(), any(), any(), any(), any(), any())).thenReturn(
+            new BehaviorRiskResult(0.91, "CRITICAL", true, -0.4, "SCORED", "features-1", "model-1"));
+        when(hardLimit.isExceeded("LOAN-AGENT-01")).thenReturn(true);
+        when(opa.decide(any())).thenReturn(
+            new PolicyDecisionResult(PolicyDecision.BLOCK, "CRITICAL", true, List.of("BEHAVIOR_ANOMALY"), "policy-1"));
+
+        AuthorizationOutcome outcome = service.decide(identity, request, "REQ-5", null, Instant.now());
+
+        ArgumentCaptor<AuthorizationContext> context = ArgumentCaptor.forClass(AuthorizationContext.class);
+        verify(opa).decide(context.capture());
+        assertThat(outcome.policyInput()).isEqualTo(new PolicyInputSnapshot("CRITICAL", true, true));
+        assertThat(outcome.policyInput().behaviorRiskLevel())
+            .isEqualTo(context.getValue().risk().behaviorRiskLevel());
+        assertThat(outcome.policyInput().hardRequestLimitExceeded())
+            .isEqualTo(context.getValue().limits().hardRequestLimitExceeded());
     }
 
     private ResolvedContext resolvedContext() {
