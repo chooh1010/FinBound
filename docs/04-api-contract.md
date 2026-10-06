@@ -886,6 +886,11 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 | 다른 결과로 이미 확정 | 다른 결과 | `409 DUPLICATE_REQUEST` | 저장하지 않고 경보 로그·`audit.outcome.conflict` 지표를 남긴다 |
 | 행 없음 / 검증된 Agent와 행의 Agent 불일치 | — | `404` | 존재 여부를 더 설명하지 않는다 |
 
+Gateway는 결과 기록 응답을 사용자 응답에 반영하지 않고 지표로만 드러낸다: `409` → `audit.outcome.delivery.conflict`,
+`400` → `audit.outcome.delivery.rejected`(계약 불일치, 다시 보내도 거절됨), 그 밖의 4xx·5xx·시간 초과·연결 오류 →
+`audit.outcome.delivery.unconfirmed`(Core가 늦게 저장했을 수 있음 — 끝내 기록되지 않았는지는 조정 배치가 판단).
+Core 쪽 `audit.outcome.conflict`는 Core가 409를 낸 횟수이고, Gateway 쪽 지표는 Gateway가 받은 결과다.
+
 검사 순서: 요청 본문 형식 검증(필수 값·`systemOutcome` 허용값 등, `400`) → 행 존재·Agent 일치(`404`) →
 결과 불변식(BLOCK의 측정값 금지 등, `400`) → 위 표. 그래서 형식이 틀린 본문은 행이 없어도 `400`이다.
 

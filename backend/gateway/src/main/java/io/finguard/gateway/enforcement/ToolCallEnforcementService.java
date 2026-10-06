@@ -27,11 +27,15 @@ import io.finguard.gateway.dto.AuditStart;
 import io.finguard.gateway.dto.DownstreamToolResult;
 import io.finguard.gateway.dto.ToolCallRequest;
 import io.finguard.gateway.dto.ToolCallResponse;
+import io.finguard.gateway.exception.AuditOutcomeConflictException;
+import io.finguard.gateway.exception.AuditOutcomeRejectedException;
 import io.finguard.gateway.exception.AuditWriteException;
 import io.finguard.gateway.exception.DownstreamTimeoutException;
 import io.finguard.gateway.exception.DownstreamUnavailableException;
 import io.finguard.gateway.exception.DuplicateRequestException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -63,15 +67,30 @@ public class ToolCallEnforcementService {
     private final CoreClient coreClient;
     private final DownstreamClient downstreamClient;
     private final Clock clock;
+    private final Counter outcomeDeliveryUnconfirmed;
+    private final Counter outcomeDeliveryConflict;
+    private final Counter outcomeDeliveryRejected;
 
     public ToolCallEnforcementService(AuthorizationService authorizationService,
                                       CoreClient coreClient,
                                       DownstreamClient downstreamClient,
-                                      Clock clock) {
+                                      Clock clock,
+                                      MeterRegistry meterRegistry) {
         this.authorizationService = authorizationService;
         this.coreClient = coreClient;
         this.downstreamClient = downstreamClient;
         this.clock = clock;
+        // "실패"나 "유실"이라 부르지 않는다. 시간 초과는 Core가 늦게 처리해 커밋했을 수도 있다
+        // (F1 단위 0 Run B). 유실 여부는 Core의 조정 배치가 감사 행으로 판단한다.
+        this.outcomeDeliveryUnconfirmed = Counter.builder("audit.outcome.delivery.unconfirmed")
+            .description("Outcome writes the gateway could not confirm (timeout, 5xx, connection error)")
+            .register(meterRegistry);
+        this.outcomeDeliveryConflict = Counter.builder("audit.outcome.delivery.conflict")
+            .description("Outcome writes rejected because Core already holds a different outcome")
+            .register(meterRegistry);
+        this.outcomeDeliveryRejected = Counter.builder("audit.outcome.delivery.rejected")
+            .description("Outcome writes Core rejected with a 4xx other than 409 (contract mismatch)")
+            .register(meterRegistry);
     }
 
     public EnforcementResult enforce(VerifiedAgentIdentity identity,
@@ -254,11 +273,31 @@ public class ToolCallEnforcementService {
                                    String requestId,
                                    String traceparent,
                                    AuditOutcome outcome) {
+        // 결과 기록은 사용자 응답을 막지 않는다. 기록이 확인되지 않으면 드러내기만 하고,
+        // 끝내 도착하지 않은 결과는 Core가 OUTCOME_UNKNOWN으로 드러낸다.
         try {
             coreClient.updateAuditOutcome(identity, requestId, outcome, traceparent);
+        } catch (AuditOutcomeConflictException e) {
+            outcomeDeliveryConflict.increment();
+            log.error("Audit outcome conflict: Core holds a different outcome requestId={} cause={}",
+                requestId, describe(e));
+        } catch (AuditOutcomeRejectedException e) {
+            outcomeDeliveryRejected.increment();
+            log.error("Audit outcome rejected by Core requestId={} cause={}", requestId, describe(e));
         } catch (AuditWriteException e) {
-            log.error("Audit outcome update failed requestId={}", requestId, e);
+            outcomeDeliveryUnconfirmed.increment();
+            log.error("Audit outcome delivery unconfirmed requestId={} cause={}", requestId, describe(e));
         }
+    }
+
+    // 예외 객체를 통째로 로그에 넘기지 않는다. HTTP 오류 예외의 메시지에는 Core 응답 본문이 실릴 수 있다
+    // (AGENTS.md — 원본 payload를 로그에 남기지 않는다). 상태 코드와 예외 종류만 남긴다.
+    private static String describe(RuntimeException failure) {
+        Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+        if (cause instanceof org.springframework.web.client.HttpStatusCodeException http) {
+            return http.getClass().getSimpleName() + " status=" + http.getStatusCode().value();
+        }
+        return cause.getClass().getSimpleName();
     }
 
     private EnforcementResult block(String requestId, String reasonCode) {
