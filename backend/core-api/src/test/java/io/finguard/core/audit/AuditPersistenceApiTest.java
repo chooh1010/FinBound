@@ -600,6 +600,187 @@ class AuditPersistenceApiTest {
                 """);
     }
 
+    /** 판정 입력 스냅샷이 오면 감사 행에 남긴다 — 감사 기록만으로 그 판정을 다시 계산할 수 있게. */
+    @Test
+    void storesThePolicyInputTheDecisionWasMadeOn() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+
+        ResponseEntity<JsonNode> response =
+                updateOutcome(requestId, "LOAN-AGENT-01",                 """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "COMPLETED",
+                  "reasonCodes": [],
+                  "downstreamReached": true,
+                  "responseReleased": true,
+                  "success": true,
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s",
+                  "policyInput": {
+                    "behaviorRiskLevel": "ALERT",
+                    "behaviorAnomalyDetected": false,
+                    "hardRequestLimitExceeded": true
+                  }
+                }
+                """.formatted(COMPLETED_AT));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> stored =
+                jdbcTemplate.queryForMap(
+                        "select behavior_risk_level, behavior_anomaly_detected, hard_request_limit_exceeded"
+                                + " from audit_events where request_id = ?",
+                        requestId);
+        assertThat(stored.get("behavior_risk_level")).isEqualTo("ALERT");
+        assertThat(stored.get("behavior_anomaly_detected")).isEqualTo(false);
+        assertThat(stored.get("hard_request_limit_exceeded")).isEqualTo(true);
+    }
+
+    /** 판정에 닿지 못한 fail-closed에 판정 입력이 붙어 오면 지어낸 근거라 거부한다. */
+    @Test
+    void rejectsPolicyInputOnAFailClosedOutcome() {
+        assertOutcomeRejected(
+                """
+                {
+                  "systemOutcome": "ERROR",
+                  "reasonCodes": ["POLICY_ENGINE_UNAVAILABLE"],
+                  "downstreamReached": false,
+                  "responseReleased": false,
+                  "success": false,
+                  "errorLocation": "OPA",
+                  "completedAt": "%s",
+                  "policyInput": {
+                    "behaviorRiskLevel": "LOW",
+                    "behaviorAnomalyDetected": false,
+                    "hardRequestLimitExceeded": false
+                  }
+                }
+                """);
+    }
+
+    @Test
+    void rejectsAPartialPolicyInput() {
+        assertOutcomeRejected(
+                """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "COMPLETED",
+                  "reasonCodes": [],
+                  "downstreamReached": true,
+                  "responseReleased": true,
+                  "success": true,
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s",
+                  "policyInput": { "behaviorRiskLevel": "LOW" }
+                }
+                """);
+    }
+
+    /**
+     * 판정 입력을 보내지 않던 Gateway가 확정한 행에, 같은 결과가 스냅샷과 함께 다시 오면 같은 결과다.
+     * 새 필드가 생겼다는 이유만으로 재전송이 409가 되면 안 된다.
+     */
+    @Test
+    void resendWithPolicyInputMatchesARowStoredWithoutIt() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+        String withoutInput =
+                """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "COMPLETED",
+                  "reasonCodes": [],
+                  "downstreamReached": true,
+                  "responseReleased": true,
+                  "success": true,
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s"
+                }
+                """.formatted(COMPLETED_AT);
+        assertThat(updateOutcome(requestId, "LOAN-AGENT-01", withoutInput).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> resent =
+                updateOutcome(requestId, "LOAN-AGENT-01",                 """
+                {
+                  "decision": "ALLOW",
+                  "systemOutcome": "COMPLETED",
+                  "reasonCodes": [],
+                  "downstreamReached": true,
+                  "responseReleased": true,
+                  "success": true,
+                  "severity": "LOW",
+                  "riskFlagged": false,
+                  "completedAt": "%s",
+                  "policyInput": {
+                    "behaviorRiskLevel": "ALERT",
+                    "behaviorAnomalyDetected": false,
+                    "hardRequestLimitExceeded": true
+                  }
+                }
+                """.formatted(COMPLETED_AT));
+
+        assertThat(resent.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // 재전송은 아무것도 바꾸지 않는다 — 판정 입력이 뒤늦게 채워지지도 않는다.
+        assertThat(jdbcTemplate.queryForObject(
+                        "select behavior_risk_level from audit_events where request_id = ?", String.class, requestId))
+                .isNull();
+    }
+
+    /** 판정 입력이 저장된 행에 판정 입력 없는 결과가 오면 충돌이다 — 저장된 근거를 지우는 것과 같다. */
+    @Test
+    void resendWithoutPolicyInputConflictsWithARowThatHasIt() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+        assertThat(updateOutcome(requestId, "LOAN-AGENT-01", """
+                {
+                  "decision": "ALLOW", "systemOutcome": "COMPLETED", "reasonCodes": [],
+                  "downstreamReached": true, "responseReleased": true, "success": true,
+                  "severity": "LOW", "riskFlagged": false, "completedAt": "%s",
+                  "policyInput": {"behaviorRiskLevel": "LOW", "behaviorAnomalyDetected": false,
+                                  "hardRequestLimitExceeded": false}
+                }
+                """.formatted(COMPLETED_AT)).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> resent = updateOutcome(requestId, "LOAN-AGENT-01", """
+                {
+                  "decision": "ALLOW", "systemOutcome": "COMPLETED", "reasonCodes": [],
+                  "downstreamReached": true, "responseReleased": true, "success": true,
+                  "severity": "LOW", "riskFlagged": false, "completedAt": "%s"
+                }
+                """.formatted(COMPLETED_AT));
+
+        assertThat(resent.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    /** 정책 BLOCK도 판정에 닿은 결과다. 판정 입력을 남기되 도달·응답 플래그는 그대로 false다. */
+    @Test
+    void storesThePolicyInputOfAPolicyBlock() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+
+        ResponseEntity<JsonNode> response = updateOutcome(requestId, "LOAN-AGENT-01", """
+                {
+                  "decision": "BLOCK", "systemOutcome": "COMPLETED", "reasonCodes": ["BEHAVIOR_ANOMALY"],
+                  "downstreamReached": false, "responseReleased": false,
+                  "severity": "CRITICAL", "riskFlagged": true, "completedAt": "%s",
+                  "policyInput": {"behaviorRiskLevel": "CRITICAL", "behaviorAnomalyDetected": true,
+                                  "hardRequestLimitExceeded": false}
+                }
+                """.formatted(COMPLETED_AT));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> stored = jdbcTemplate.queryForMap(
+                "select behavior_risk_level, downstream_reached, response_released from audit_events"
+                        + " where request_id = ?",
+                requestId);
+        assertThat(stored.get("behavior_risk_level")).isEqualTo("CRITICAL");
+        assertThat(stored.get("downstream_reached")).isEqualTo(false);
+        assertThat(stored.get("response_released")).isEqualTo(false);
+    }
+
     @Test
     void doesNotAllowAFinalAuditToBeOverwritten() {
         String requestId = requestId();

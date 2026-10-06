@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
@@ -29,6 +30,9 @@ public class AiClientImpl implements AiClient {
     private static final String SERVICE_CREDENTIAL_HEADER = "X-FinGuard-Service-Credential";
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
     private static final String TRACEPARENT_HEADER = "Traceparent";
+    // 계약(docs/04 §11)과 Core의 BehaviorRiskLevel이 받는 값. 이 밖의 값을 OPA에 넘기면 판정은 나도
+    // Core가 결과 기록을 400으로 거절해 감사 결과가 사라진다 — 판정 전에 응답 오류로 보고 fail-closed한다.
+    private static final Set<String> BEHAVIOR_RISK_LEVELS = Set.of("LOW", "ALERT", "CRITICAL");
 
     private final RestClient restClient;
     private final String baseUrl;
@@ -75,6 +79,9 @@ public class AiClientImpl implements AiClient {
                 .body(BehaviorRiskResult.class);
             if (response == null || response.behaviorRiskLevel() == null) {
                 throw new AiUnavailableException("AI behavior response is incomplete");
+            }
+            if (!BEHAVIOR_RISK_LEVELS.contains(response.behaviorRiskLevel())) {
+                throw new AiUnavailableException("AI behavior response has an unknown risk level");
             }
             return response;
         } catch (RestClientException e) {

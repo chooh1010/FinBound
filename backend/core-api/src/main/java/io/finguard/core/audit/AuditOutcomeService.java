@@ -79,7 +79,8 @@ public class AuditOutcomeService {
                 if (attempt >= MAX_ATTEMPTS) {
                     throw AuditOperationException.writeFailed(exception);
                 }
-                log.info("Audit outcome raced with another writer, re-reading requestId={} attempt={}", requestId, attempt);
+                log.info("Audit outcome raced with another writer, re-reading requestId={} attempt={}",
+                        requestId, attempt);
             } catch (DataAccessException exception) {
                 throw AuditOperationException.writeFailed(exception);
             }
@@ -170,7 +171,8 @@ public class AuditOutcomeService {
                     request.severity(),
                     request.riskFlagged(),
                     request.policyVersion(),
-                    request.completedAt());
+                    request.completedAt(),
+                    request.policyInput() == null ? null : request.policyInput().toDomain());
         } catch (IllegalArgumentException exception) {
             throw AuditOperationException.invalidOutcome();
         }

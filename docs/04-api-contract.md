@@ -853,6 +853,26 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 
 `errorLocation`은 `^[A-Z][A-Z0-9_]*$` 형식이다.
 
+정책 판정에 닿은 결과는 선택 필드 `policyInput`으로 **OPA에 실제로 보낸 입력 중 Core 감사 행에 없던 값**을
+함께 보낼 수 있다(`contracts/audit/execution-outcome.schema.json`).
+
+```json
+"policyInput": {
+  "behaviorRiskLevel": "ALERT",
+  "behaviorAnomalyDetected": false,
+  "hardRequestLimitExceeded": false
+}
+```
+
+- ScopeStatus·Prompt Risk는 Core가 Context Resolve 때 이미 기록하므로 다시 보내지 않는다. 이 셋까지 있어야 감사 기록만으로
+  그 판정을 다시 계산할 수 있다(정책 변경 재평가).
+- 셋은 함께 보낸다. 판정에 닿지 못한 fail-closed(`decision` 없음)에는 보내지 않는다 — 보내면 `400`.
+- 보내지 않는 Gateway의 요청도 그대로 받는다(선택 필드, `null`은 생략과 같다). 그런 행은 판정 입력이 없는 행으로 남아, 감사 기록만으로 그 판정을 다시 계산할 수 없다.
+- §11 적용표의 "같은 결과" 비교에 포함된다. 단 비대칭이다: 판정 입력 없이 확정된 행에 같은 결과가 판정 입력과 함께 다시
+  오면 같은 결과(200, 저장값 그대로)로 본다 — 새 필드가 생겼다는 이유로 재전송이 충돌이 되지 않게. 반대로 판정 입력이
+  저장된 행에 다른 값이나 판정 입력 없는 결과가 오면 `409`다 — 저장된 근거를 조용히 지우거나 바꾸지 않는다.
+- `behaviorAnomalyDetected`는 현재 정책이 읽지 않는다. 기록만 한다.
+
 `systemOutcome`은 `COMPLETED | ERROR`만 받는다. `PROCESSING`과 `OUTCOME_UNKNOWN`은 `400`으로
 거부한다 — `OUTCOME_UNKNOWN`은 Core만 기록하는 상태다(docs/06 §10).
 
@@ -865,6 +885,11 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 | 같은 결과로 이미 확정 | 같은 결과 | `200` | 멱등 성공. 아무것도 바꾸지 않는다 |
 | 다른 결과로 이미 확정 | 다른 결과 | `409 DUPLICATE_REQUEST` | 저장하지 않고 경보 로그·`audit.outcome.conflict` 지표를 남긴다 |
 | 행 없음 / 검증된 Agent와 행의 Agent 불일치 | — | `404` | 존재 여부를 더 설명하지 않는다 |
+
+Gateway는 결과 기록 응답을 사용자 응답에 반영하지 않고 지표로만 드러낸다: `409` → `audit.outcome.delivery.conflict`,
+`400` → `audit.outcome.delivery.rejected`(계약 불일치, 다시 보내도 거절됨), 그 밖의 4xx·5xx·시간 초과·연결 오류 →
+`audit.outcome.delivery.unconfirmed`(Core가 늦게 저장했을 수 있음 — 끝내 기록되지 않았는지는 조정 배치가 판단).
+Core 쪽 `audit.outcome.conflict`는 Core가 409를 낸 횟수이고, Gateway 쪽 지표는 Gateway가 받은 결과다.
 
 검사 순서: 요청 본문 형식 검증(필수 값·`systemOutcome` 허용값 등, `400`) → 행 존재·Agent 일치(`404`) →
 결과 불변식(BLOCK의 측정값 금지 등, `400`) → 위 표. 그래서 형식이 틀린 본문은 행이 없어도 `400`이다.

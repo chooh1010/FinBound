@@ -23,7 +23,9 @@ public record AuditOutcome(
     String severity,
     Boolean riskFlagged,
     String policyVersion,
-    Instant completedAt
+    Instant completedAt,
+    // 판정에 닿은 경우에만 있다. 추가 필드라 기존 Core는 무시해도 된다.
+    PolicyInputSnapshot policyInput
 ) {
     public AuditOutcome {
         reasonCodes = reasonCodes == null ? Set.of() : Set.copyOf(reasonCodes);

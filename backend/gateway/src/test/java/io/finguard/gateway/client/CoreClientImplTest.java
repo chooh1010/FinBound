@@ -29,6 +29,8 @@ import io.finguard.gateway.dto.AuditStart;
 import io.finguard.gateway.dto.BehaviorHistory;
 import io.finguard.gateway.dto.ResolvedContext;
 import io.finguard.gateway.dto.ToolCallRequest;
+import io.finguard.gateway.exception.AuditOutcomeConflictException;
+import io.finguard.gateway.exception.AuditOutcomeRejectedException;
 import io.finguard.gateway.exception.AuditWriteException;
 import io.finguard.gateway.exception.BehaviorHistoryUnavailableException;
 import io.finguard.gateway.exception.DuplicateRequestException;
@@ -191,13 +193,80 @@ class CoreClientImplTest {
             "CRITICAL",
             true,
             "policy-1",
-            Instant.now());
+            Instant.now(),
+            new io.finguard.gateway.dto.PolicyInputSnapshot("ALERT", true, false));
 
         client.updateAuditOutcome(identity, "REQ-1", outcome, "trace");
 
         assertThat(server.getAllServeEvents()).hasSize(1);
+        // Core의 PolicyInputRequest와 같은 JSON 필드 이름이어야 한다(docs/04 §11).
         server.verify(patchRequestedFor(urlEqualTo("/internal/v1/audits/REQ-1/outcome"))
             .withRequestBody(matchingJsonPath("$.severity", equalTo("CRITICAL")))
-            .withRequestBody(matchingJsonPath("$.riskFlagged", equalTo("true"))));
+            .withRequestBody(matchingJsonPath("$.riskFlagged", equalTo("true")))
+            .withRequestBody(matchingJsonPath("$.policyInput.behaviorRiskLevel", equalTo("ALERT")))
+            .withRequestBody(matchingJsonPath("$.policyInput.behaviorAnomalyDetected", equalTo("true")))
+            .withRequestBody(matchingJsonPath("$.policyInput.hardRequestLimitExceeded", equalTo("false"))));
+    }
+
+    @Test
+    void outcomeConflictIsMappedToConflictException() {
+        stubOutcome(409);
+
+        assertThatThrownBy(() -> client.updateAuditOutcome(identity, "REQ-1", minimalOutcome(), "trace"))
+            .isInstanceOf(AuditOutcomeConflictException.class);
+    }
+
+    @Test
+    void badRequestOnOutcomeIsARejection() {
+        stubOutcome(400);
+
+        assertThatThrownBy(() -> client.updateAuditOutcome(identity, "REQ-1", minimalOutcome(), "trace"))
+            .isInstanceOf(AuditOutcomeRejectedException.class);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {401, 403, 404, 408, 429})
+    void otherClientErrorsOnOutcomeStayUnconfirmed(int status) {
+        stubOutcome(status);
+
+        assertThatThrownBy(() -> client.updateAuditOutcome(identity, "REQ-1", minimalOutcome(), "trace"))
+            .isInstanceOf(AuditWriteException.class)
+            .isNotInstanceOf(AuditOutcomeRejectedException.class)
+            .isNotInstanceOf(AuditOutcomeConflictException.class);
+    }
+
+    @Test
+    void serverErrorsOnOutcomeStayUnconfirmed() {
+        stubOutcome(503);
+
+        assertThatThrownBy(() -> client.updateAuditOutcome(identity, "REQ-1", minimalOutcome(), "trace"))
+            .isInstanceOf(AuditWriteException.class)
+            .isNotInstanceOf(AuditOutcomeRejectedException.class)
+            .isNotInstanceOf(AuditOutcomeConflictException.class);
+    }
+
+    private void stubOutcome(int status) {
+        server.stubFor(com.github.tomakehurst.wiremock.client.WireMock.patch(
+                urlEqualTo("/internal/v1/audits/REQ-1/outcome"))
+            .willReturn(aResponse().withStatus(status)));
+    }
+
+    private AuditOutcome minimalOutcome() {
+        return new AuditOutcome(
+            io.finguard.gateway.contract.PolicyDecision.ALLOW,
+            "COMPLETED",
+            java.util.Set.of(),
+            true,
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "LOW",
+            false,
+            "policy-1",
+            Instant.now(),
+            null);
     }
 }

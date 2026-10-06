@@ -8,6 +8,7 @@ import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.domain.Severity;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -31,7 +32,28 @@ public record AuditOutcomeRequest(
         Severity severity,
         Boolean riskFlagged,
         @Size(max = 64) String policyVersion,
-        @NotNull Instant completedAt) {
+        @NotNull Instant completedAt,
+        @Valid PolicyInputRequest policyInput) {
+
+    /** 판정 입력 스냅샷 없이 보내던 Gateway의 요청 모양. */
+    public AuditOutcomeRequest(
+            PolicyDecision decision,
+            AuditStatus systemOutcome,
+            Set<ReasonCode> reasonCodes,
+            Boolean downstreamReached,
+            Boolean responseReleased,
+            Boolean success,
+            Integer recordsRead,
+            Long latencyMs,
+            String errorLocation,
+            BigDecimal behaviorRisk,
+            Severity severity,
+            Boolean riskFlagged,
+            String policyVersion,
+            Instant completedAt) {
+        this(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success, recordsRead,
+                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt, null);
+    }
 
     public AuditOutcomeRequest {
         reasonCodes = reasonCodes == null ? null : Set.copyOf(reasonCodes);
@@ -50,6 +72,12 @@ public record AuditOutcomeRequest(
     @AssertTrue(message = "AUDIT_OUTCOME_UNKNOWN is assigned by Core only")
     public boolean isWithoutCoreOnlyReason() {
         return reasonCodes == null || !reasonCodes.contains(ReasonCode.AUDIT_OUTCOME_UNKNOWN);
+    }
+
+    /** 판정에 닿지 못한 결과(fail-closed)에는 판정 입력이 없다. 있으면 지어낸 근거다. */
+    @AssertTrue(message = "policyInput requires a policy decision")
+    public boolean isPolicyInputBackedByDecision() {
+        return policyInput == null || decision != null;
     }
 
     @AssertTrue(message = "COMPLETED requires a policy decision")

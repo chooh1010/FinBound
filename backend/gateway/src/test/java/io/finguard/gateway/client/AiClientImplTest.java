@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.List;
@@ -28,6 +29,7 @@ import io.finguard.gateway.dto.PromptRiskSnapshot;
 import io.finguard.gateway.dto.ResolvedContext;
 import io.finguard.gateway.dto.ScopeStatus;
 import io.finguard.gateway.dto.ToolCallRequest;
+import io.finguard.gateway.exception.AiUnavailableException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
 
 class AiClientImplTest {
@@ -141,5 +143,44 @@ class AiClientImplTest {
         String body = server.getAllServeEvents().getFirst().getRequest().getBodyAsString();
         assertThat(body).contains("REQ-COMPLETE");
         assertThat(body).doesNotContain("REQ-INCOMPLETE");
+    }
+
+    @Test
+    void evaluateBehaviorRejectsAnUnknownRiskLevel() {
+        // 계약 밖의 등급을 OPA에 넘기면 Core가 결과 기록을 거절해 감사 결과가 사라진다 — 판정 전에 거부한다.
+        server.stubFor(post(urlEqualTo("/internal/v1/risk/behavior"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {
+                      "behaviorRisk": 0.5,
+                      "behaviorRiskLevel": "MEDIUM",
+                      "isAnomaly": false,
+                      "rawScore": 0.2,
+                      "historyStatus": "READY",
+                      "featureVersion": "behavior-features-1",
+                      "modelVersion": "iforest-1"
+                    }
+                    """)));
+
+        ToolCallRequest request = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+            List.of(FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+        ResolvedContext context = new ResolvedContext(
+            UUID.randomUUID(),
+            new ResolvedContext.References("EMP-101", "LOAN-2026-001", "PASS-001"),
+            ScopeStatus.allOk(),
+            PromptRiskSnapshot.notEvaluated());
+
+        assertThatThrownBy(() -> client.evaluateBehavior(
+            VerifiedAgentIdentity.verified("LOAN-AGENT-01"),
+            request,
+            context,
+            new BehaviorHistory("LOAN-AGENT-01", "5m", List.of()),
+            "REQ-3",
+            "trace",
+            Instant.parse("2026-08-17T12:00:00Z")))
+            .isInstanceOf(AiUnavailableException.class);
     }
 }

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditScopeStatus;
 import io.finguard.core.domain.AuditStatus;
+import io.finguard.core.domain.BehaviorRiskLevel;
 import io.finguard.core.domain.DataType;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.PromptRiskEvaluationStatus;
@@ -25,8 +26,9 @@ import io.finguard.core.domain.Tool;
  * <p>{@code status}와 {@code systemOutcome}을 둘 다 내보낸다. 엔티티는 한 컬럼에 접어 두었지만
  * 계약은 두 속성으로 정의하고, 프론트는 {@code systemOutcome}으로 ERROR를 가려낸다.
  *
- * <p>behavior 등급·버전 3개는 여기 없다. 저장 칸은 {@code V3}가 만들었지만 Gateway가 실어 보내는
- * 경로가 아직 없어 항상 null이다 — 없는 값을 키만 만들어 내보내면 "채워졌는데 비었다"로 읽힌다.
+ * <p>behavior 등급은 Gateway가 판정 입력과 함께 보내면서부터 채워진다(그 전 행은 null이라 키가 빠진다).
+ * behavior 버전 2개는 여기 없다 — 저장 칸은 {@code V3}가 만들었지만 실어 보내는 경로가 아직 없어 항상
+ * null이고, 없는 값을 키만 만들어 내보내면 "채워졌는데 비었다"로 읽힌다.
  *
  * <p><strong>null은 키째로 뺀다.</strong> 스키마의 선택적 속성은 대부분 enum이거나 타입이 정해져 있어
  * null을 값으로 허용하지 않고, BLOCK의 실행 측정값 셋은 값이 아니라 <em>키의 존재 자체</em>를 금지한다
@@ -52,6 +54,7 @@ public record AuditEventView(
         PromptRiskLevel promptRiskLevel,
         String promptModelVersion,
         BigDecimal behaviorRisk,
+        BehaviorRiskLevel behaviorRiskLevel,
         Severity severity,
         Boolean riskFlagged,
         PolicyDecision decision,
@@ -94,6 +97,7 @@ public record AuditEventView(
                 event.getPromptRiskLevel(),
                 event.getPromptModelVersion(),
                 event.getBehaviorRisk(),
+                event.getPolicyInput() == null ? null : event.getPolicyInput().behaviorRiskLevel(),
                 event.getSeverity(),
                 event.getRiskFlagged(),
                 event.getDecision(),
