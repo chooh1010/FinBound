@@ -13,4 +13,5 @@ include(
     "backend:agent",
     "backend:audit",
     "backend:mock-finance",
+    "backend:alert-worker",
 )
