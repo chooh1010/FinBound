@@ -157,15 +157,54 @@ test_hard_request_limit_is_blocked if {
     result.reasonCodes == ["HARD_REQUEST_LIMIT_EXCEEDED"]
 }
 
-test_behavior_critical_is_allowed_and_flagged_not_blocked if {
+test_behavior_critical_asks_for_approval if {
     request := object.union(base_input, {
         "risk": object.union(base_input.risk, {"behaviorRiskLevel": "CRITICAL"}),
     })
     result := authorization.decision with input as request
-    result.decision == "ALLOW"
+    result.decision == "APPROVAL"
     result.severity == "HIGH"
     result.riskFlagged
-    result.reasonCodes == []
+    result.reasonCodes == ["BEHAVIOR_ANOMALY"]
+    result.policyVersion == "loan-review-policy-3"
+}
+
+# 등급·한도의 모든 조합에서 판정은 정확히 하나이고 우선순위는 BLOCK > APPROVAL > ALLOW다.
+# 규칙이 겹치면 이 평가 자체가 충돌 오류로 실패한다.
+test_decisions_are_exclusive_and_ordered if {
+    every behavior in {"LOW", "ALERT", "CRITICAL"} {
+        every prompt in {"LOW", "ALERT", "CRITICAL"} {
+            every limited in {false, true} {
+                request := object.union(base_input, {
+                    "risk": {
+                        "promptRiskLevel": prompt,
+                        "promptInjectionDetected": prompt == "CRITICAL",
+                        "behaviorRiskLevel": behavior,
+                    },
+                    "limits": {"hardRequestLimitExceeded": limited},
+                })
+                result := authorization.decision with input as request
+                result.decision == expected_decision(behavior, prompt, limited)
+            }
+        }
+    }
+}
+
+expected_decision(_, prompt, limited) := "BLOCK" if {
+    some blocked in [prompt == "CRITICAL", limited]
+    blocked
+}
+
+expected_decision(behavior, prompt, limited) := "APPROVAL" if {
+    prompt != "CRITICAL"
+    not limited
+    behavior == "CRITICAL"
+}
+
+expected_decision(behavior, prompt, limited) := "ALLOW" if {
+    prompt != "CRITICAL"
+    not limited
+    behavior != "CRITICAL"
 }
 
 test_behavior_critical_still_blocks_alongside_another_deny_reason if {

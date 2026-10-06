@@ -566,8 +566,8 @@ DB 접근은 Core Persistence Layer만 수행한다.
 7. 새 악성 Prompt/Document 입력 → Prompt Risk 생성
 8. 동일 입력의 후속 Tool Call에서 Prompt Detector 재추론 없이 Snapshot 재사용
 9. Prompt Detector miss + Case Rule 차단
-10. Scope 정상 / Hard Limit 미초과 Behavior Critical → AI-only BLOCK
+10. Scope 정상 / Hard Limit 미초과 Behavior Critical → APPROVAL(실행 보류, 승인 요청 PENDING)
 11. 인증 실패 요청 → Business Audit 없음 + SecurityAuthEvent 존재
-12. Dashboard에서 ALLOW/BLOCK/ERROR 근거 확인
+12. Dashboard에서 ALLOW/BLOCK/APPROVAL/ERROR 근거 확인
 13. Docker Compose 재현
 14. Kubernetes 우회 방지는 P1 로드맵으로 설명

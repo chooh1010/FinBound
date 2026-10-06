@@ -15,12 +15,14 @@ import org.junit.jupiter.api.Test;
 
 import io.finguard.core.domain.AgentRun;
 import io.finguard.core.domain.AgentRunStatus;
+import io.finguard.core.domain.ApprovalStatus;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.DataType;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.Tool;
 import io.finguard.core.repository.AgentRunRepository;
+import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.finguard.core.security.CoreApiAccessDeniedException;
 import io.finguard.core.security.CoreApiPrincipal;
@@ -30,11 +32,24 @@ class AgentExecutionServiceTest {
 
     private final AgentRunRepository agentRuns = mock(AgentRunRepository.class);
     private final AuditEventRepository auditEvents = mock(AuditEventRepository.class);
+    private final ApprovalRequestRepository approvalRequests = mock(ApprovalRequestRepository.class);
     private AgentExecutionService service;
 
     @BeforeEach
     void setUp() {
-        service = new AgentExecutionService(agentRuns, auditEvents);
+        service = new AgentExecutionService(agentRuns, auditEvents, approvalRequests);
+    }
+
+    @Test
+    void marksTheRunWhileAnApprovalIsPending() {
+        when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run(AgentRunStatus.COMPLETED)));
+        when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1")).thenReturn(List.of());
+        when(approvalRequests.existsByAgentRunIdAndStatus("RUN-1", ApprovalStatus.PENDING)).thenReturn(true);
+
+        AgentExecutionResponse response = service.find("RUN-1", viewer());
+
+        assertThat(response.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(response.reasonCodes()).containsExactly("AUDIT_APPROVAL_PENDING");
     }
 
     @Test
@@ -138,6 +153,35 @@ class AgentExecutionServiceTest {
                 .containsExactly("REQ-2");
         assertThat(response.reasonCodes())
                 .containsExactly("AUDIT_OUTCOME_UNKNOWN", "CASE_SCOPE_VIOLATION");
+    }
+
+    @Test
+    void anApprovalAttemptIsShownAsCompletedWithoutReachingDownstream() {
+        AuditEvent approval = mock(AuditEvent.class);
+        when(approval.getStatus()).thenReturn(AuditStatus.COMPLETED);
+        when(approval.getRequestId()).thenReturn("REQ-3");
+        when(approval.getRequestedTool()).thenReturn(Tool.CREDIT_SCORE_READ);
+        when(approval.getTargetConsumerId()).thenReturn("CUST-1001");
+        when(approval.getRequestedData()).thenReturn(Set.of(DataType.CREDIT_SCORE));
+        when(approval.getDecision()).thenReturn(PolicyDecision.APPROVAL);
+        when(approval.getReasonCodes()).thenReturn(Set.of("BEHAVIOR_ANOMALY"));
+        when(approval.getDownstreamReached()).thenReturn(false);
+        when(approval.getResponseReleased()).thenReturn(false);
+        when(approval.getRequestedAt()).thenReturn(Instant.parse("2026-08-17T12:00:02Z"));
+        when(approval.getCompletedAt()).thenReturn(Instant.parse("2026-08-17T12:00:03Z"));
+        when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run(AgentRunStatus.COMPLETED)));
+        when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1")).thenReturn(List.of(approval));
+        when(approvalRequests.existsByAgentRunIdAndStatus("RUN-1", ApprovalStatus.PENDING)).thenReturn(true);
+
+        AgentExecutionResponse response = service.find("RUN-1", viewer());
+
+        assertThat(response.attempts()).singleElement().satisfies(attempt -> {
+            assertThat(attempt.decision()).isEqualTo(PolicyDecision.APPROVAL);
+            assertThat(attempt.systemOutcome()).isEqualTo(AuditStatus.COMPLETED);
+            assertThat(attempt.downstreamReached()).isFalse();
+            assertThat(attempt.responseReleased()).isFalse();
+        });
+        assertThat(response.reasonCodes()).containsExactly("AUDIT_APPROVAL_PENDING", "BEHAVIOR_ANOMALY");
     }
 
     @Test

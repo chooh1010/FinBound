@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -19,11 +20,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.PolicyDecision;
+import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.domain.Severity;
 import io.finguard.core.domain.Tool;
+import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -39,9 +43,11 @@ class AuditOutcomeServiceRetryTest {
     private static final Instant NOW = Instant.parse("2026-10-05T12:02:00Z");
 
     private final AuditEventRepository repository = mock(AuditEventRepository.class);
+    private final ApprovalRequestRepository approvalRequests = mock(ApprovalRequestRepository.class);
     private final AuditOutcomeService service =
             new AuditOutcomeService(
                     repository,
+                    approvalRequests,
                     mock(PlatformTransactionManager.class),
                     Clock.fixed(NOW, ZoneOffset.UTC),
                     new SimpleMeterRegistry());
@@ -77,6 +83,53 @@ class AuditOutcomeServiceRetryTest {
                 .extracting("reasonCode")
                 .isEqualTo("AUDIT_WRITE_FAILED");
         verify(repository, times(3)).findByRequestId("REQ-1");
+    }
+
+    @Test
+    void anApprovalThatWinsOnRetryOpensExactlyOneRequest() {
+        // 진 시도는 감사 저장(saveAndFlush)에서 실패하므로 승인 요청까지 가지 않는다. 이긴 시도만 하나를 연다.
+        AuditEvent unknownNow = event();
+        unknownNow.markOutcomeUnknown(NOW.minusSeconds(5));
+        when(repository.findByRequestId("REQ-1"))
+                .thenReturn(Optional.of(event()))
+                .thenReturn(Optional.of(unknownNow));
+        when(repository.saveAndFlush(any(AuditEvent.class)))
+                .thenThrow(new ObjectOptimisticLockingFailureException(AuditEvent.class, "AUD-1"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateOutcome("REQ-1", approval(), "LOAN-AGENT-01");
+
+        verify(approvalRequests, times(1)).saveAndFlush(any(ApprovalRequest.class));
+    }
+
+    @Test
+    void anApprovalThatNeverWinsOpensNoRequest() {
+        when(repository.findByRequestId("REQ-1")).thenAnswer(invocation -> Optional.of(event()));
+        when(repository.saveAndFlush(any(AuditEvent.class)))
+                .thenThrow(new ObjectOptimisticLockingFailureException(AuditEvent.class, "AUD-1"));
+
+        assertThatThrownBy(() -> service.updateOutcome("REQ-1", approval(), "LOAN-AGENT-01"))
+                .isInstanceOf(AuditOperationException.class);
+
+        verify(approvalRequests, never()).saveAndFlush(any(ApprovalRequest.class));
+    }
+
+    private static AuditOutcomeRequest approval() {
+        return new AuditOutcomeRequest(
+                PolicyDecision.APPROVAL,
+                AuditStatus.COMPLETED,
+                Set.of(ReasonCode.BEHAVIOR_ANOMALY),
+                false,
+                false,
+                null,
+                null,
+                null,
+                null,
+                new BigDecimal("1.0000"),
+                Severity.HIGH,
+                true,
+                "loan-review-policy-3",
+                REQUESTED_AT.plusSeconds(1));
     }
 
     private static AuditEvent event() {

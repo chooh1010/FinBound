@@ -53,7 +53,7 @@
     "riskFlagged": { "type": "boolean" },
     "decision": {
       "type": "string",
-      "enum": ["ALLOW", "BLOCK"]
+      "enum": ["ALLOW", "BLOCK", "APPROVAL"]
     },
     "reasonCodes": { "$ref": "#/$defs/reasonCodes" },
     "policyVersion": { "$ref": "#/$defs/nonEmptyIdentifier" },
@@ -193,8 +193,14 @@
       }
     },
     {
+      "$comment": "A policy decision always carries its severity and risk flag, as in ExecutionOutcome.",
+      "if": { "required": ["decision"] },
+      "then": { "required": ["severity", "riskFlagged"] }
+    },
+    {
+      "$comment": "BLOCK and APPROVAL never ran the tool: no downstream, no response, no execution measurements.",
       "if": {
-        "properties": { "decision": { "const": "BLOCK" } },
+        "properties": { "decision": { "enum": ["BLOCK", "APPROVAL"] } },
         "required": ["decision"]
       },
       "then": {

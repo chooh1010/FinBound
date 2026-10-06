@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -174,6 +175,46 @@ class ToolCallEnforcementServiceTest {
         assertThat(outcome.systemOutcome()).isEqualTo("COMPLETED");
         assertThat(outcome.success()).isNull();
         assertThat(outcome.errorLocation()).isNull();
+    }
+
+    @Test
+    void approvalDoesNotRunTheToolAndAnswers202() {
+        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("CRITICAL", true, false);
+        when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
+            new AuthorizationOutcome(
+                new PolicyDecisionResult(PolicyDecision.APPROVAL, "HIGH", true,
+                    List.of("BEHAVIOR_ANOMALY"), "loan-review-policy-3"),
+                1.0,
+                snapshot));
+
+        EnforcementResult result = service.enforce(identity, request, "REQ-APPROVAL", "trace");
+
+        assertThat(result.status().value()).isEqualTo(202);
+        assertThat(result.body().decision()).isEqualTo(PolicyDecision.APPROVAL);
+        assertThat(result.body().reasonCodes()).containsExactly("BEHAVIOR_ANOMALY");
+        assertThat(result.body().result()).isNull();
+        verify(downstreamClient, never()).execute(any(), any(), any());
+
+        AuditOutcome outcome = captureOutcome("REQ-APPROVAL");
+        assertThat(outcome.decision()).isEqualTo(PolicyDecision.APPROVAL);
+        assertThat(outcome.systemOutcome()).isEqualTo("COMPLETED");
+        assertThat(outcome.reasonCodes()).containsExactly("BEHAVIOR_ANOMALY");
+        assertThat(outcome.downstreamReached()).isFalse();
+        assertThat(outcome.responseReleased()).isFalse();
+        assertThat(outcome.success()).isNull();
+        assertThat(outcome.recordsRead()).isNull();
+        assertThat(outcome.latencyMs()).isNull();
+        assertThat(outcome.severity()).isEqualTo("HIGH");
+        assertThat(outcome.riskFlagged()).isTrue();
+        assertThat(outcome.policyInput()).isEqualTo(snapshot);
+
+        // 같은 requestId 재시도는 다시 판정하지 않고 같은 202를 돌려준다.
+        EnforcementResult repeated = service.enforce(identity, request, "REQ-APPROVAL", "trace");
+        assertThat(repeated.status().value()).isEqualTo(202);
+        assertThat(repeated.body()).isEqualTo(result.body());
+        verify(authorizationService, times(1)).decide(any(), any(), any(), any(), any());
+        verify(coreClient, times(1)).updateAuditOutcome(any(), eq("REQ-APPROVAL"), any(), any());
+        verify(downstreamClient, never()).execute(any(), any(), any());
     }
 
     @Test

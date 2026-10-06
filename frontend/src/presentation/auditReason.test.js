@@ -19,6 +19,17 @@ describe('audit reason presentation', () => {
     })).toContain('오류')
   })
 
+  it('describes an approval as held for a person, not as a block', () => {
+    const description = describeAuditReason({
+      auditStatus: 'COMPLETED',
+      decision: 'APPROVAL',
+      reasonCodes: ['BEHAVIOR_ANOMALY'],
+    })
+
+    expect(description).toContain('담당자 확인')
+    expect(description).not.toContain('차단')
+  })
+
   it('uses the normal message only for an explicit completed allow without a reason code', () => {
     expect(describeAuditReason({
       auditStatus: 'COMPLETED',

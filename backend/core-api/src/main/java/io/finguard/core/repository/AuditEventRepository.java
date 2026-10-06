@@ -50,13 +50,16 @@ public interface AuditEventRepository
      *
      * <p>ALLOW·ERROR를 빼면 실행 실패가 이력에 한 번도 실리지 않아 {@code errorRatio5m}이 실패를 볼 수 없다
      * (docs/03 §8). 판정 전 오류(decision 없음)·PROCESSING·OUTCOME_UNKNOWN은 결과를 모르므로 뺀다.
+     * APPROVAL도 뺀다 — 행동 Feature는 ALLOW·BLOCK만 정의한다(docs/04 §9).
      */
     @Query(
             """
             select e from AuditEvent e
             where e.agentId = :agentId
               and e.requestedAt >= :since
-              and (e.status = io.finguard.core.domain.AuditStatus.COMPLETED
+              and ((e.status = io.finguard.core.domain.AuditStatus.COMPLETED
+                    and e.decision in (io.finguard.core.domain.PolicyDecision.ALLOW,
+                                       io.finguard.core.domain.PolicyDecision.BLOCK))
                    or (e.status = io.finguard.core.domain.AuditStatus.ERROR
                        and e.decision = io.finguard.core.domain.PolicyDecision.ALLOW))
             order by e.requestedAt desc

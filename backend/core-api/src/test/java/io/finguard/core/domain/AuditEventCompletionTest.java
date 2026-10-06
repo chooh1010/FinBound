@@ -76,6 +76,26 @@ class AuditEventCompletionTest {
     }
 
     @Test
+    void approvalOutcomeFollowsTheSameNotExecutedRulesAsBlock() {
+        // APPROVAL도 Tool을 실행하지 않았다. Downstream 도달·응답 반환·측정값·빈 사유를 BLOCK과 같이 거부한다.
+        assertThatThrownBy(() -> completion(PolicyDecision.APPROVAL, AuditStatus.COMPLETED,
+                        Set.of("BEHAVIOR_ANOMALY"), true, false, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> completion(PolicyDecision.APPROVAL, AuditStatus.COMPLETED,
+                        Set.of("BEHAVIOR_ANOMALY"), false, true, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> completion(PolicyDecision.APPROVAL, AuditStatus.COMPLETED,
+                        Set.of("BEHAVIOR_ANOMALY"), false, false, true))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> completion(PolicyDecision.APPROVAL, AuditStatus.COMPLETED,
+                        Set.of(), false, false, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(completion(PolicyDecision.APPROVAL, AuditStatus.COMPLETED,
+                        Set.of("BEHAVIOR_ANOMALY"), false, false, null).decision())
+                .isEqualTo(PolicyDecision.APPROVAL);
+    }
+
+    @Test
     void errorOutcomeCannotClaimTheResponseWasReleased() {
         assertThatThrownBy(() -> completion(PolicyDecision.ALLOW, AuditStatus.ERROR,
                         Set.of("DOWNSTREAM_TIMEOUT"), true, true, false))
@@ -136,7 +156,7 @@ class AuditEventCompletionTest {
                 systemOutcome == AuditStatus.ERROR ? "DOWNSTREAM" : null,
                 null,
                 decision == PolicyDecision.BLOCK ? Severity.CRITICAL : Severity.LOW,
-                decision == PolicyDecision.BLOCK,
+                decision != PolicyDecision.ALLOW,
                 "loan-review-policy-1",
                 COMPLETED_AT);
     }

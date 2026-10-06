@@ -34,7 +34,7 @@ test('AI readiness, internal authentication, and risk-signal-only contract', asy
   expect(signal).not.toHaveProperty('allowed')
 })
 
-test('real AI behavior CRITICAL signal is flagged, not blocked, by real OPA policy', async ({ request }) => {
+test('real AI behavior CRITICAL signal asks for approval under the real OPA policy', async ({ request }) => {
   const now = new Date('2026-08-17T23:00:00Z')
   const history = Array.from({ length: 18 }, (_, index) => ({
     requestId: `REQ-E2E-BEHAVIOR-${index}`,
@@ -98,10 +98,10 @@ test('real AI behavior CRITICAL signal is flagged, not blocked, by real OPA poli
     },
   )
   expect(policyResponse.ok()).toBeTruthy()
-  // policy-2: a behavior CRITICAL alone is flagged, not blocked (policy/finguard_authz.rego).
+  // policy-3: a behavior CRITICAL alone asks a person to approve (policy/finguard_authz.rego).
   expect((await policyResponse.json()).result).toMatchObject({
-    decision: 'ALLOW',
-    reasonCodes: [],
+    decision: 'APPROVAL',
+    reasonCodes: ['BEHAVIOR_ANOMALY'],
     riskFlagged: true,
   })
 })

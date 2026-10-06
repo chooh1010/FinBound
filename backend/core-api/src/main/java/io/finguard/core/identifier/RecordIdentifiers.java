@@ -17,6 +17,10 @@ public final class RecordIdentifiers {
         return identifier("SEC-");
     }
 
+    public static String approvalRequestId() {
+        return identifier("APR-");
+    }
+
     private static String identifier(String prefix) {
         return prefix + UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.ROOT);
     }

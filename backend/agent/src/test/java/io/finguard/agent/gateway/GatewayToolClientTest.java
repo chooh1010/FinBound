@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -124,6 +125,63 @@ class GatewayToolClientTest {
                 .isNotBlank();
         assertThat(captured.get().headers().getFirst(GatewayToolClient.TRACEPARENT_HEADER))
                 .matches("00-[0-9a-f]{32}-[0-9a-f]{16}-01");
+    }
+
+    @Test
+    void acceptsGatewayApprovalWithoutAFinancialResult() {
+        GatewayToolClient client = client(
+                request -> jsonResponse(
+                        HttpStatus.ACCEPTED,
+                        "{\"requestId\":\"REQ-003\",\"decision\":\"APPROVAL\","
+                                + "\"reasonCodes\":[\"BEHAVIOR_ANOMALY\"]}"
+                ),
+                Duration.ofSeconds(1)
+        );
+
+        GatewayToolCallResponse response = client.execute(toolRequest()).block();
+
+        assertThat(response).isNotNull();
+        assertThat(response.decision()).isEqualTo(PolicyDecision.APPROVAL);
+        assertThat(response.reasonCodes()).containsExactly("BEHAVIOR_ANOMALY");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"requestId\":\"REQ-003\",\"decision\":\"APPROVAL\"}",
+        "{\"requestId\":\"REQ-003\",\"decision\":\"APPROVAL\",\"reasonCodes\":[\" \"]}",
+        "{\"requestId\":\"REQ-003\",\"decision\":\"APPROVAL\",\"reasonCodes\":[\"BEHAVIOR_ANOMALY\"],"
+                + "\"result\":{\"creditScore\":812}}"
+    })
+    void rejectsApprovalWithoutReasonsOrWithAResult(String body) {
+        GatewayToolClient client = client(request -> jsonResponse(HttpStatus.ACCEPTED, body), Duration.ofSeconds(1));
+
+        assertThatThrownBy(() -> client.execute(toolRequest()).block())
+                .isInstanceOf(GatewayCallException.class)
+                .hasMessage("GATEWAY_RESPONSE_INVALID");
+    }
+
+    @Test
+    void rejectsApprovalOutsideA202AndA202ThatIsNotAnApproval() {
+        String approval = "{\"requestId\":\"REQ-003\",\"decision\":\"APPROVAL\","
+                + "\"reasonCodes\":[\"BEHAVIOR_ANOMALY\"]}";
+        String block = "{\"requestId\":\"REQ-003\",\"decision\":\"BLOCK\","
+                + "\"reasonCodes\":[\"CASE_SCOPE_VIOLATION\"]}";
+
+        // ALLOW는 금융 결과까지 갖춰서, 상태 코드 규칙만으로 거부되는지 본다.
+        String allow = "{\"requestId\":\"REQ-003\",\"decision\":\"ALLOW\","
+                + "\"result\":{\"tool\":\"CREDIT_SCORE_READ\",\"consumerId\":\"CUST-1001\",\"creditScore\":812}}";
+
+        for (var pair : List.of(
+                Map.entry(HttpStatus.OK, approval),
+                Map.entry(HttpStatus.FORBIDDEN, approval),
+                Map.entry(HttpStatus.ACCEPTED, block),
+                Map.entry(HttpStatus.ACCEPTED, allow))) {
+            GatewayToolClient client = client(
+                    request -> jsonResponse(pair.getKey(), pair.getValue()), Duration.ofSeconds(1));
+            assertThatThrownBy(() -> client.execute(toolRequest()).block())
+                    .isInstanceOf(GatewayCallException.class)
+                    .hasMessage("GATEWAY_RESPONSE_INVALID");
+        }
     }
 
     @Test

@@ -1,0 +1,20 @@
+{
+  "requestId": "REQ-004",
+  "decision": "APPROVAL",
+  "systemOutcome": "COMPLETED",
+  "reasonCodes": [
+    "BEHAVIOR_ANOMALY"
+  ],
+  "downstreamReached": true,
+  "responseReleased": true,
+  "severity": "HIGH",
+  "riskFlagged": true,
+  "completedAt": "2026-08-17T21:33:11+09:00",
+  "policyInput": {
+    "behaviorRiskLevel": "CRITICAL",
+    "behaviorAnomalyDetected": true,
+    "hardRequestLimitExceeded": false
+  },
+  "success": true,
+  "latencyMs": 120
+}

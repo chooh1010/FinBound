@@ -132,14 +132,23 @@ public class ToolCallEnforcementService {
 
         AuthorizationOutcome outcome = authorizationService.decide(
             identity, request, requestId, traceparent, requestedAt);
-        if (!outcome.isAllow()) {
-            EnforcementResult result = block(requestId, outcome.reasonCodes());
-            safeUpdateOutcome(identity, requestId, traceparent, blockOutcome(outcome, clock.instant()));
-            completedResponses.put(requestId, result);
-            return result;
-        }
-
-        return executeAllowedDownstream(identity, request, requestId, traceparent, outcome);
+        // 판정마다 갈래를 따로 둔다. 예전 "ALLOW가 아니면 차단"은 새 판정을 차단으로 기록했다.
+        return switch (outcome.decision().decision()) {
+            case ALLOW -> executeAllowedDownstream(identity, request, requestId, traceparent, outcome);
+            case BLOCK -> {
+                EnforcementResult result = block(requestId, outcome.reasonCodes());
+                safeUpdateOutcome(identity, requestId, traceparent, blockOutcome(outcome, clock.instant()));
+                completedResponses.put(requestId, result);
+                yield result;
+            }
+            case APPROVAL -> {
+                EnforcementResult result = new EnforcementResult(
+                    HttpStatus.ACCEPTED, ToolCallResponse.approval(requestId, outcome.reasonCodes()));
+                safeUpdateOutcome(identity, requestId, traceparent, approvalOutcome(outcome, clock.instant()));
+                completedResponses.put(requestId, result);
+                yield result;
+            }
+        };
     }
 
     private EnforcementResult executeAllowedDownstream(VerifiedAgentIdentity identity,
@@ -226,6 +235,26 @@ public class ToolCallEnforcementService {
             outcome.policyVersion(),
             completedAt,
             systemFailure ? null : outcome.policyInput());
+    }
+
+    /** 실행하지 않았다 — BLOCK처럼 Downstream·응답·측정값이 없다. 승인 요청은 Core가 이 결과로 연다. */
+    private AuditOutcome approvalOutcome(AuthorizationOutcome outcome, Instant completedAt) {
+        return new AuditOutcome(
+            PolicyDecision.APPROVAL,
+            "COMPLETED",
+            Set.copyOf(outcome.reasonCodes()),
+            false,
+            false,
+            null,
+            null,
+            null,
+            null,
+            behaviorRisk(outcome),
+            outcome.severity(),
+            outcome.riskFlagged(),
+            outcome.policyVersion(),
+            completedAt,
+            outcome.policyInput());
     }
 
     private AuditOutcome allowOutcome(AuthorizationOutcome outcome, Instant completedAt, long latencyMs) {

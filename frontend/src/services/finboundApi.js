@@ -189,6 +189,7 @@ function executionDescription(attempt) {
   if (attempt.systemOutcome === 'ERROR') return '업무 시스템 처리 중 오류가 발생해 결과를 제공하지 못했습니다.'
   if (attempt.decision === 'BLOCK') return '현재 업무 범위를 벗어난 요청으로 금융시스템 조회 전에 차단했습니다.'
   if (attempt.decision === 'ALLOW' && attempt.systemOutcome === 'COMPLETED') return '현재 업무 범위 안에서 자료 확인을 완료했습니다.'
+  if (attempt.decision === 'APPROVAL') return '정책이 담당자 확인을 요구해 금융시스템을 조회하지 않았습니다. 승인 처리 기능은 아직 제공되지 않습니다.'
   return '실행 결과의 상세 설명이 제공되지 않았습니다.'
 }
 
@@ -211,6 +212,13 @@ function mapExecutionAttempt(raw = {}) {
 }
 
 const OUTCOME_UNKNOWN_REASON = 'AUDIT_OUTCOME_UNKNOWN'
+
+// Core가 붙이는 실행 사유다. 승인을 기다리는 시도가 있으면 Agent 실행은 끝나도 업무는 끝나지 않았다(docs/04 §3).
+const APPROVAL_PENDING_REASON = 'AUDIT_APPROVAL_PENDING'
+
+function hasApprovalPending(execution) {
+  return Array.isArray(execution?.reasonCodes) && execution.reasonCodes.includes(APPROVAL_PENDING_REASON)
+}
 
 function hasOutcomeUnknown(execution) {
   return Array.isArray(execution?.reasonCodes) && execution.reasonCodes.includes(OUTCOME_UNKNOWN_REASON)
@@ -278,7 +286,8 @@ function isContractualAttempt(attempt) {
   if (attempt.systemOutcome === 'ERROR') {
     return attempt.decision === undefined || attempt.decision === 'ALLOW'
   }
-  return ['ALLOW', 'BLOCK'].includes(attempt.decision)
+  // APPROVAL도 BLOCK처럼 실행하지 않은 판정이다. COMPLETED로 확정되고 사람의 확인을 기다린다(docs/06 §11).
+  return ['ALLOW', 'BLOCK', 'APPROVAL'].includes(attempt.decision)
 }
 
 async function getAgentExecution(agentRunId) {
@@ -305,6 +314,7 @@ function mapAgentExecution(agentRun, permission, execution) {
   const attempts = (execution.attempts ?? []).map(mapExecutionAttempt)
   const allowedCount = attempts.filter((attempt) => attempt.decision === 'ALLOW' && attempt.systemOutcome !== 'ERROR').length
   const blockedCount = attempts.filter((attempt) => attempt.decision === 'BLOCK').length
+  const approvalCount = attempts.filter((attempt) => attempt.decision === 'APPROVAL').length
   const status = execution.status === 'FAILED' ? 'ERROR' : execution.status
   const errorCount = Math.max(
     attempts.filter((attempt) => attempt.systemOutcome === 'ERROR').length,
@@ -312,12 +322,14 @@ function mapAgentExecution(agentRun, permission, execution) {
   )
   const executionReasonCodes = Array.isArray(execution.reasonCodes) ? execution.reasonCodes : []
   const outcomeUnknown = hasOutcomeUnknown(execution)
+  const approvalPending = hasApprovalPending(execution)
 
   if (status === 'RUNNING') {
     return {
       status,
       // Core는 실행 상태와 무관하게 결과 미확인을 표시한다. 실행 중이어도 경고를 잃지 않는다.
       outcomeUnknown,
+      approvalPending,
       title: 'AI 업무를 실행하고 있습니다',
       message: 'Core가 Agent를 호출했으며 실행 결과를 기다리고 있습니다.',
       resultHeading: '현재 업무 권한이 준비되었습니다',
@@ -341,6 +353,14 @@ function mapAgentExecution(agentRun, permission, execution) {
         extraItems: ['결과 미확인 시도 있음', `실행 사유 ${executionReasonCodes.join(' · ')}`],
         nextAction: '업무 기록에서 결과 미확인 건을 확인한 뒤 진행해 주세요.',
       }
+    : approvalPending && !failed
+    ? {
+        // 승인은 차단도 완료도 아니다. 해당 조회는 실행되지 않았고, 승인 처리 기능은 아직 없다.
+        title: '담당자 확인을 기다리는 조회가 있습니다',
+        message: '정책이 사람의 확인을 요구해 일부 조회를 실행하지 않았습니다. 정상 완료로 처리하지 않았습니다.',
+        extraItems: ['승인 대기 시도 있음'],
+        nextAction: '업무 기록에서 승인 대기 건의 사유를 확인해 주세요.',
+      }
     : {
         title: failed ? 'AI 업무 처리 중 오류가 발생했습니다' : 'AI 업무 처리가 완료되었습니다',
         message: failed
@@ -355,12 +375,14 @@ function mapAgentExecution(agentRun, permission, execution) {
   return {
     status,
     outcomeUnknown,
+    approvalPending,
     title: outcome.title,
     message: outcome.message,
     resultHeading: 'Agent 실행 결과',
     resultItems: [
       `정상 확인 ${allowedCount}건`,
       `안전 차단 ${blockedCount}건`,
+      ...(approvalCount ? [`승인 대기 ${approvalCount}건`] : []),
       `처리 오류 ${errorCount}건`,
       ...outcome.extraItems,
     ],
@@ -407,6 +429,7 @@ const mockApi = {
       total: events.length,
       allow: events.filter((event) => eventOutcome(event) === 'ALLOW').length,
       block: events.filter((event) => eventOutcome(event) === 'BLOCK').length,
+      approval: events.filter((event) => eventOutcome(event) === 'APPROVAL').length,
       error: events.filter((event) => eventOutcome(event) === 'ERROR').length,
       outcomeUnknown: events.filter((event) => event.auditStatus === 'OUTCOME_UNKNOWN').length,
     }
