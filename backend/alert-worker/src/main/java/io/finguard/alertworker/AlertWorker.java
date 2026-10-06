@@ -85,16 +85,12 @@ public class AlertWorker {
         if (haltReason.get() != null) {
             return 0;
         }
-        jdbc.update("insert into checkpoints (consumer_name) values (?) on conflict do nothing", CONSUMER_NAME);
-        Checkpoint checkpoint = jdbc.queryForObject(
-                "select generation, after_seq from checkpoints where consumer_name = ?",
-                (row, index) -> new Checkpoint(row.getString("generation"), row.getLong("after_seq")),
-                CONSUMER_NAME);
+        Checkpoint checkpoint = loadCheckpoint();
         FeedClient.Page page;
         try {
             page = feed.read(checkpoint.after(), properties.batchSize());
         } catch (FeedClient.FeedRefusedException exception) {
-            halt(exception.reason(), checkpoint.after(), null, null);
+            halt(exception.reason(), checkpoint.after(), exception.reason(), null, null);
             return 0;
         } catch (FeedClient.FeedUnavailableException exception) {
             feedUnavailable.increment();
@@ -103,7 +99,7 @@ public class AlertWorker {
             return 0;
         }
         if (checkpoint.generation() != null && !checkpoint.generation().equals(page.generation())) {
-            halt("FEED_GENERATION_CHANGED", checkpoint.after(), null, null);
+            halt("FEED_GENERATION_CHANGED", checkpoint.after(), "FEED_GENERATION_CHANGED", null, null);
             return 0;
         }
         if (!consistent(checkpoint.after(), page)) {
@@ -112,31 +108,44 @@ public class AlertWorker {
             return 0;
         }
 
-        List<Verified> trusted = new ArrayList<>();
-        EventVerifier.IntegrityException untrusted = null;
-        long untrustedPosition = -1;
-        for (FeedClient.Entry entry : page.events()) {
-            try {
-                trusted.add(new Verified(entry.feedSeq(), EventVerifier.verify(entry.eventJson(), entry.eventHash())));
-            } catch (EventVerifier.IntegrityException exception) {
-                untrusted = exception;
-                untrustedPosition = entry.feedSeq();
-                break;
-            }
-        }
+        TrustedPrefix prefix = trustedPrefix(page);
         // 믿을 수 있는 앞부분까지만 체크포인트를 옮긴다. 깨진 이벤트 앞에서 멈춘다.
-        long nextAfter = untrusted != null
-                ? (trusted.isEmpty() ? checkpoint.after() : trusted.get(trusted.size() - 1).feedSeq())
+        long nextAfter = prefix.untrusted() != null
+                ? (prefix.events().isEmpty() ? checkpoint.after() : prefix.events().get(prefix.events().size() - 1)
+                        .feedSeq())
                 : page.nextAfter();
-        int fresh = commit(checkpoint, page.generation(), nextAfter, trusted);
-        if (untrusted != null) {
-            onUntrusted(untrustedPosition, untrusted.reason(), untrusted.receivedHash(), untrusted.computedHash());
+        int fresh = commit(checkpoint, page.generation(), nextAfter, prefix.events());
+        if (prefix.untrusted() != null) {
+            EventVerifier.IntegrityException untrusted = prefix.untrusted();
+            onUntrusted(prefix.untrustedPosition(), untrusted.reason(), untrusted.receivedHash(),
+                    untrusted.computedHash());
         } else {
             failingPosition = -1;
             failuresAtPosition = 0;
             consecutiveFailures.set(0);
         }
         return fresh;
+    }
+
+    private Checkpoint loadCheckpoint() {
+        jdbc.update("insert into checkpoints (consumer_name) values (?) on conflict do nothing", CONSUMER_NAME);
+        return jdbc.queryForObject(
+                "select generation, after_seq from checkpoints where consumer_name = ?",
+                (row, index) -> new Checkpoint(row.getString("generation"), row.getLong("after_seq")),
+                CONSUMER_NAME);
+    }
+
+    /** 처음부터 확인해 믿을 수 있는 이벤트까지만 고른다. 첫 번째로 믿을 수 없는 이벤트에서 멈춘다. */
+    private static TrustedPrefix trustedPrefix(FeedClient.Page page) {
+        List<Verified> trusted = new ArrayList<>();
+        for (FeedClient.Entry entry : page.events()) {
+            try {
+                trusted.add(new Verified(entry.feedSeq(), EventVerifier.verify(entry.eventJson(), entry.eventHash())));
+            } catch (EventVerifier.IntegrityException exception) {
+                return new TrustedPrefix(trusted, exception, entry.feedSeq());
+            }
+        }
+        return new TrustedPrefix(trusted, null, -1);
     }
 
     /** 번호는 체크포인트보다 크고 엄격히 늘어야 하며, 다음 위치는 마지막 번호(빈 페이지면 체크포인트 그대로)여야 한다. */
@@ -205,10 +214,6 @@ public class AlertWorker {
         }
     }
 
-    private void halt(String reason, long position, String receivedHash, String computedHash) {
-        halt(reason, position, reason, receivedHash, computedHash);
-    }
-
     /**
      * 먼저 멈추고 그다음 기록한다. 기록이 실패해도(예: DB 장애) 멈춘 상태는 유지된다 — 기록 실패가 정지를 무력화하면 안 된다.
      */
@@ -243,5 +248,9 @@ public class AlertWorker {
     }
 
     private record Verified(long feedSeq, JsonNode event) {
+    }
+
+    private record TrustedPrefix(List<Verified> events, EventVerifier.IntegrityException untrusted,
+            long untrustedPosition) {
     }
 }

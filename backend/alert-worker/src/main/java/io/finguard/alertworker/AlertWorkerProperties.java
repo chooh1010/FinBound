@@ -16,7 +16,8 @@ import jakarta.validation.constraints.Positive;
  * 경보 워커 설정.
  *
  * @param feedUrl Core 기본 주소(예: {@code http://core-api:8080})
- * @param feedCredential 피드 전용 읽기 Credential. 비어 있으면 기동하지 않는다
+ * @param feedCredential 피드 전용 읽기 Credential. 비어 있으면 기동하지 않는다. Core의
+ *     {@code finguard.events.feed.credential}과 같은 값(환경 변수 {@code FINGUARD_EVENT_FEED_CREDENTIAL})
  * @param pollingEnabled 끄면 폴링하지 않는다. 테스트처럼 직접 부를 때만 끈다
  * @param pollInterval 폴링 간격
  * @param batchSize 한 번에 받는 최대 이벤트 수

@@ -114,11 +114,6 @@ public class EventConsumerRunner {
         return event;
     }
 
-    /** 테스트용 진입점. 봉투 검사를 DB 없이 본다. */
-    public static JsonNode verifyForTest(EventSource.Received received) {
-        return verified(received);
-    }
-
     private static String text(JsonNode event, String field) {
         JsonNode value = event.get(field);
         if (value == null || !value.isTextual()) {

@@ -54,7 +54,12 @@ public class EventFeedSecurityConfig {
         return credential;
     }
 
-    /** @param credential 피드 전용 읽기 Credential. 비우면 피드를 열지 않는다 */
+    /**
+     * 같은 값이 세 이름으로 불린다: 환경 변수 {@code FINGUARD_EVENT_FEED_CREDENTIAL}, Core 속성
+     * {@code finguard.events.feed.credential}, 워커 속성 {@code finguard.alert-worker.feed-credential}.
+     *
+     * @param credential 피드 전용 읽기 Credential. 비우면 피드를 열지 않는다
+     */
     @ConfigurationProperties(prefix = "finguard.events.feed")
     public record EventFeedProperties(String credential) {
     }

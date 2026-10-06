@@ -74,7 +74,7 @@ public class ApprovalExpiry {
                 if (request == null || !request.expireIfDue(approvalRequests.databaseNow())) {
                     return false;
                 }
-                        // 저장과 이번 전이의 이벤트 v2 기록을 한 곳에서 한다(ApprovalEventWriter).
+                // 저장과 이번 전이의 이벤트 v2 기록을 한 곳에서 한다(ApprovalEventWriter).
                 approvalEvents.save(request);
                 return true;
             });

@@ -3,11 +3,8 @@ package io.finguard.core.notification;
 import java.time.Instant;
 import java.util.List;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -84,13 +81,6 @@ public class NotificationController {
         return ResponseEntity.noContent().build();
     }
 
-    @ExceptionHandler(NotificationNotFoundException.class)
-    ResponseEntity<ProblemDetail> notFound() {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다.");
-        problem.setProperty("reasonCode", "NOTIFICATION_NOT_FOUND");
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
-    }
-
     /** 역할별로 보이는 알림. 조건의 자리표시자는 직원 id 하나다. */
     enum Visibility {
         OPERATOR("(n.recipient_type = 'EMPLOYEE' and n.recipient = ?)"),
@@ -114,12 +104,6 @@ public class NotificationController {
         /** 읽음 조인의 직원 id와 조건의 직원 id. */
         Object[] arguments(String employeeId) {
             return new Object[] {employeeId, employeeId};
-        }
-    }
-
-    static class NotificationNotFoundException extends RuntimeException {
-        NotificationNotFoundException() {
-            super("Notification not found");
         }
     }
 

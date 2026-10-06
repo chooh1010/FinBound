@@ -66,6 +66,9 @@ class NotificationConsumerScheduling {
     }
 
     /**
+     * {@code enabled}는 클래스의 {@code @ConditionalOnProperty}가, {@code interval}은 {@code @Scheduled}가 읽는다. 여기
+     * 두는 것은 기본값과 설명을 한 곳에 모으기 위해서다.
+     *
      * @param enabled 끄면 알림을 만들지 않는다. 테스트처럼 직접 부를 때만 끈다
      * @param interval 주기
      * @param batchSize 한 번에 받는 최대 이벤트 수

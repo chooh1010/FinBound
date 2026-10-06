@@ -85,10 +85,8 @@ class ToolCallEventOutboxTest {
 
     @AfterEach
     void removePoison() {
-        jdbc.execute("drop trigger if exists poisoned_event on event_outbox");
-        jdbc.execute("drop trigger if exists poisoned_event on approval_requests");
-        jdbc.execute("drop function if exists poisoned_event()");
-        jdbc.execute("drop table if exists poison_target");
+        PoisonedInserts.remove(jdbc, "event_outbox");
+        PoisonedInserts.remove(jdbc, "approval_requests");
     }
 
     @Test
@@ -184,12 +182,12 @@ class ToolCallEventOutboxTest {
     void failureAfterTheEventWasWrittenRollsBackBothAndARetryRecordsExactlyOne() {
         // 이벤트는 들어갔지만 같은 트랜잭션의 승인 요청 생성이 실패한다.
         insertProcessing("AUD-LATER", "now() - interval '1 minute'");
-        poisonTable("approval_requests", "audit_event_id", "AUD-LATER");
+        PoisonedInserts.install(jdbc, "approval_requests", "audit_event_id", "AUD-LATER");
         AuditOutcomeRequest outcome = approval();
 
         assertThat(catchThrowable(() -> outcomes.updateOutcome("REQ-AUD-LATER", outcome, AGENT))).isNotNull();
         assertThat(count()).isZero();
-        jdbc.execute("drop trigger poisoned_event on approval_requests");
+        PoisonedInserts.remove(jdbc, "approval_requests");
         outcomes.updateOutcome("REQ-AUD-LATER", outcome, AGENT);
 
         // 확정 하나와 승인 요청 하나 — 실패한 시도의 이벤트는 남지 않았다.
@@ -238,24 +236,7 @@ class ToolCallEventOutboxTest {
     }
 
     private void poison(String auditEventId) {
-        poisonTable("event_outbox", "aggregate_id", auditEventId);
-    }
-
-    /** 지정한 표에 그 값을 가진 행이 들어오면 실패시킨다. 트랜잭션 중간의 쓰기 실패를 만든다. */
-    private void poisonTable(String table, String column, String value) {
-        jdbc.execute("create table poison_target (aggregate_id varchar(64) primary key)");
-        jdbc.update("insert into poison_target values (?)", value);
-        jdbc.execute("""
-                create function poisoned_event() returns trigger language plpgsql as $$
-                begin
-                    if exists (select 1 from poison_target where aggregate_id = new.%s) then
-                        raise exception 'poisoned write %%', new.%s;
-                    end if;
-                    return new;
-                end;
-                $$""".formatted(column, column));
-        jdbc.execute("create trigger poisoned_event before insert on " + table
-                + " for each row execute function poisoned_event()");
+        PoisonedInserts.install(jdbc, "event_outbox", "aggregate_id", auditEventId);
     }
 
     private JsonNode payloadOf(String auditEventId) {

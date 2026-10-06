@@ -118,8 +118,7 @@ class ApprovalEventOutboxTest {
 
     @AfterEach
     void removePoison() {
-        jdbc.execute("drop trigger if exists poisoned_event on event_outbox");
-        jdbc.execute("drop function if exists poisoned_event()");
+        PoisonedInserts.remove(jdbc, "event_outbox");
     }
 
     @Test
@@ -253,17 +252,7 @@ class ApprovalEventOutboxTest {
     @Test
     void failedEventWriteRollsBackTheDecision() {
         String approvalId = openApproval("REQ-POISON");
-        jdbc.execute("""
-                create function poisoned_event() returns trigger language plpgsql as $$
-                begin
-                    if new.event_type = 'APPROVAL_APPROVED' then
-                        raise exception 'poisoned approval event';
-                    end if;
-                    return new;
-                end;
-                $$""");
-        jdbc.execute("create trigger poisoned_event before insert on event_outbox"
-                + " for each row execute function poisoned_event()");
+        poisonType("APPROVAL_APPROVED");
 
         assertThat(catchThrowable(() -> approvals.approve(approvalId, APPROVER, null))).isNotNull();
 
@@ -302,17 +291,7 @@ class ApprovalEventOutboxTest {
     }
 
     private void poisonType(String eventType) {
-        jdbc.execute("""
-                create function poisoned_event() returns trigger language plpgsql as $$
-                begin
-                    if new.event_type = '%s' then
-                        raise exception 'poisoned approval event';
-                    end if;
-                    return new;
-                end;
-                $$""".formatted(eventType));
-        jdbc.execute("create trigger poisoned_event before insert on event_outbox"
-                + " for each row execute function poisoned_event()");
+        PoisonedInserts.install(jdbc, "event_outbox", "event_type", eventType);
     }
 
     private JsonNode eventFor(String approvalAndSequence) {
