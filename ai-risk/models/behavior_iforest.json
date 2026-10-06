@@ -1,12 +1,12 @@
 {
-  "modelVersion": "iforest-1",
-  "artifactSha256": "371f2dd9f1232a655ab36d318c1ec358de2fd9905682f083fb1fc947c65e07ea",
-  "featureVersion": "behavior-features-1",
-  "datasetVersion": "synthetic-agent-log-4",
+  "modelVersion": "iforest-2",
+  "artifactSha256": "941597be241ebdad36df933ab7a6e19626af06d14f6915e1fef1fa2618db9325",
+  "featureVersion": "behavior-features-2",
+  "datasetVersion": "synthetic-agent-log-5",
   "randomSeed": 42,
-  "alertThreshold": 0.9041666666666667,
+  "alertThreshold": 0.9083333333333333,
   "criticalThreshold": 1.0,
-  "trainedAt": "2026-08-27T14:13:25.938857+00:00",
+  "trainedAt": "2026-10-06T09:41:04.522878+00:00",
   "featureNames": [
     "requestCount1m",
     "requestCount5m",

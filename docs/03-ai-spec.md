@@ -273,7 +273,7 @@ BUT
 행동 패턴이 정상 분포에서 극단적으로 이탈
 
 → Isolation Forest Critical
-→ BLOCK
+→ BLOCK (loan-review-policy-2에서는 보류: ALLOW + riskFlagged, 아래 §AI Critical Block 참고)
 ```
 
 ### 알고리즘
@@ -343,7 +343,7 @@ raw anomaly score
 | `uniqueCustomers5m` | 최근 5분 고유 고객 수 |
 | `uniqueTools5m` | 최근 5분 고유 Tool 수 |
 | `blockRatio5m` | 최근 5분 완료 요청 중 BLOCK 비율 |
-| `errorRatio5m` | 최근 5분 완료 요청 중 ERROR 비율 |
+| `errorRatio5m` | 최근 5분 허용(ALLOW)된 요청 중 실행 실패 비율. BLOCK은 실행되지 않아 분자·분모 모두에서 뺀다 |
 | `averageRequestIntervalMs` | 최근 요청 간 평균 시간 |
 | `caseSwitchCount5m` | 최근 5분 Case 변경 수 |
 | `financialDataRequestCount5m` | 최근 5분 금융 데이터 요청 건수 |
@@ -428,6 +428,8 @@ behaviorRisk가 alertThreshold 이상
 
 #### B. AI Critical Block
 
+> `loan-review-policy-2`부터 행동 CRITICAL만으로는 차단하지 않는다 — 이유와 수치는 `docs/06-common-conventions.md` §15.
+
 ```text
 Scope 정상
 동일 Case / 동일 Consumer
@@ -482,8 +484,8 @@ datasetVersion
 
 ```json
 {
-  "modelVersion": "iforest-1",
-  "featureVersion": "behavior-features-1",
+  "modelVersion": "iforest-2",
+  "featureVersion": "behavior-features-2",
   "datasetVersion": "synthetic-agent-log-1",
   "trainedAt": "2026-08-17T10:00:00+09:00",
   "randomSeed": 42
@@ -523,7 +525,7 @@ alertThreshold <= behaviorRisk < criticalThreshold
 
 behaviorRisk >= criticalThreshold
 → BEHAVIOR_ANOMALY
-→ BLOCK 가능
+→ BLOCK 가능 (loan-review-policy-2에서는 보류 — §AI Critical Block 참고)
 
 requestCount1m > hardRequestLimit1m
 → HARD_REQUEST_LIMIT_EXCEEDED
@@ -572,6 +574,7 @@ Authorization Latency P50 / P95
 ```
 
 AI 독립 가치 검증에서는 `Scope 정상 + Hard Limit 미초과 + behaviorRisk Critical` 시나리오에서 Baseline은 ALLOW, FinGuard는 BLOCK이 되는 차이를 확인한다.
+`loan-review-policy-2`에서는 행동 Critical 단독 차단을 보류했으므로 이 기준은 심각도를 다시 설계할 때까지 적용하지 않는다. 그동안은 FinGuard가 같은 시나리오를 `riskFlagged=true`로 드러내는지 확인한다.
 
 ---
 
@@ -589,9 +592,9 @@ AI 독립 가치 검증에서는 `Scope 정상 + Hard Limit 미초과 + behavior
   "historyStatus": "READY",
   "modelVersions": {
     "prompt": "prompt-guard-6",
-    "behavior": "iforest-1"
+    "behavior": "iforest-2"
   },
-  "featureVersion": "behavior-features-1",
+  "featureVersion": "behavior-features-2",
   "evaluatedAt": "2026-08-17T14:01:00+09:00"
 }
 ```

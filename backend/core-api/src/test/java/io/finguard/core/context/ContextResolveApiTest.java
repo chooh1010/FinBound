@@ -211,6 +211,25 @@ class ContextResolveApiTest {
     }
 
     @Test
+    void fillsTheCaseOnAnAuditRowCreatedWithoutOne() {
+        // Gateway는 선저장 때 caseId를 보내지 않는다(Passport를 해석하기 전이다). 근거를 적을 때 Case를
+        // 채우지 않으면 Behavior History의 모든 행이 Case 없이 나가 AI 이력이 비게 된다.
+        RunReferences run = startAgentRun();
+        createAudit(run, "LOAN-AGENT-01", null);
+
+        assertThat(resolve(run, "LOAN-AGENT-01", "CUST-1001", "CREDIT_SCORE_READ", "CREDIT_SCORE")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "select case_id from audit_events where request_id = ?",
+                                String.class,
+                                REQUEST_ID))
+                .isEqualTo(run.caseId());
+    }
+
+    @Test
     void refusesToResolveWhenNoAuditRowIsWaitingForTheEvidence() {
         RunReferences run = startAgentRun();
         // 감사행을 만들지 않는다. docs/02:143-149 순서를 어긴 호출이다.
@@ -441,6 +460,10 @@ class ContextResolveApiTest {
      * {@code X-Verified-Agent-Id} 헤더에서 온다({@code AuditService.create}).
      */
     private void createAudit(RunReferences run, String owningAgentId) {
+        createAudit(run, owningAgentId, run.caseId());
+    }
+
+    private void createAudit(RunReferences run, String owningAgentId, String caseId) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set(InternalCredentialFilter.CREDENTIAL_HEADER, "test-internal-credential");
@@ -456,14 +479,17 @@ class ContextResolveApiTest {
                                   "traceId": "4bf92f0000000001",
                                   "agentRunId": "%s",
                                   "verifiedAgentId": "LOAN-AGENT-01",
-                                  "caseId": "%s",
+                                  "caseId": %s,
                                   "targetConsumerId": "CUST-1001",
                                   "requestedTool": "CREDIT_SCORE_READ",
                                   "status": "PROCESSING",
                                   "requestedAt": "2026-08-25T12:00:00Z"
                                 }
                                 """
-                                        .formatted(REQUEST_ID, run.agentRunId(), run.caseId()),
+                                        .formatted(
+                                                REQUEST_ID,
+                                                run.agentRunId(),
+                                                caseId == null ? "null" : "\"" + caseId + "\""),
                                 headers),
                         JsonNode.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);

@@ -55,7 +55,10 @@ def test_training_is_reproducible_for_fixed_seed() -> None:
     assert first_metrics["heldOutTest"]["falsePositiveRateAtCritical"] <= 0.05
     held_out_scenarios = first_metrics["heldOutTest"]["scenarioMetrics"]
     assert held_out_scenarios["RAPID_REPETITION"]["recallAtAlert"] >= 0.90
-    assert held_out_scenarios["RAPID_REPETITION"]["recallAtCritical"] <= 0.15
+    # No bound on RAPID_REPETITION reaching CRITICAL: the rank risk saturates at 1.0, so whether
+    # this ALERT-only scenario crosses the CRITICAL threshold depends on the training seed (0% to
+    # 62.5% across seeds even for iforest-1). loan-review-policy-2 therefore does not block on a
+    # behavior CRITICAL alone; the bound returns when severity is redesigned (model card).
     assert held_out_scenarios["AFTER_HOURS_ACCUMULATION"]["recallAtCritical"] >= 0.90
     assert 0 <= first.alert_threshold < first.critical_threshold <= 1
     assert first.alert_threshold == first_metrics["alertThreshold"]
@@ -75,7 +78,6 @@ def test_training_is_reproducible_for_fixed_seed() -> None:
         metrics["minRecallAtExpectedLevel"] >= 0.50
         for metrics in stress["anomalyScenarioWorstCase"].values()
     )
-    assert stress["anomalyScenarioWorstCase"]["RAPID_REPETITION"]["maxRecallAtCritical"] <= 0.25
 
 
 def test_behavior_splits_do_not_share_agent_sessions() -> None:

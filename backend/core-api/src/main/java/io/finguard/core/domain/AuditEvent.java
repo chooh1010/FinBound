@@ -249,13 +249,21 @@ public class AuditEvent {
         //
         // Scope 판정만 대조하면 부족하다. 판정이 OK로 같아도 대상 Passport나 Employee가 다르면
         // 그건 다른 사건이고, 덮어쓰는 순간 앞선 판정의 근거가 조용히 바뀐다.
+        // Gateway는 감사행을 만들 때 Case를 모른다(선저장 시점엔 Passport를 해석하기 전이다). Resolver가
+        // Passport에서 확정한 Case를 여기서 적는다. 비어 있으면 Behavior History(docs/04 §9)가 이 사건을
+        // 맥락 없는 행으로 내보내고, Gateway는 그런 행을 AI에 넘기지 않아 이력이 통째로 사라진다.
+        if (caseId != null && !caseId.equals(context.caseId())) {
+            throw new IllegalStateException("AuditEvent already belongs to a different case");
+        }
         if (isEvidenceRecorded()) {
-            if (!currentEvidence().matches(context)) {
+            // Case 없이 근거만 적힌 행은 이 변경 전에 만들어진 것이다. 무엇과 대조할지 몰라 거부한다.
+            if (caseId == null || !currentEvidence().matches(context)) {
                 throw new IllegalStateException("AuditEvent already carries different evidence");
             }
             return;
         }
         this.employeeId = context.employeeId();
+        this.caseId = context.caseId();
         this.passportId = context.passportId();
         this.requestedData.clear();
         this.requestedData.addAll(context.requestedData());
@@ -277,6 +285,7 @@ public class AuditEvent {
     private ResolvedAuditContext currentEvidence() {
         return new ResolvedAuditContext(
                 employeeId,
+                caseId,
                 passportId,
                 requestedData,
                 scopeStatus,

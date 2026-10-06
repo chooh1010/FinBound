@@ -7,7 +7,7 @@ import numpy as np
 
 from app.schemas.behavior import CompletedBehaviorEvent, CurrentToolCallAttempt, Decision
 
-FEATURE_VERSION = "behavior-features-1"
+FEATURE_VERSION = "behavior-features-2"
 BEHAVIOR_WINDOW = timedelta(minutes=5)
 BUSINESS_TIMEZONE = ZoneInfo("Asia/Seoul")
 FEATURE_NAMES = (
@@ -43,7 +43,10 @@ def build_feature_vector(
 
     completed_count = len(recent_5m)
     block_count = sum(event.decision is Decision.BLOCK for event in recent_5m)
-    error_count = sum(not event.success for event in recent_5m)
+    # A BLOCK never ran, so it is neither a success nor a failure. Counting it here as well would
+    # weigh every block twice (blockRatio5m already has it) — behavior-features-1 did exactly that.
+    allowed = [event for event in recent_5m if event.decision is Decision.ALLOW]
+    error_count = sum(event.success is False for event in allowed)
 
     timeline = [event.requested_at for event in recent_5m] + [current.requested_at]
     intervals = [(right - left).total_seconds() * 1000 for left, right in pairwise(timeline)]
@@ -61,7 +64,7 @@ def build_feature_vector(
         len({event.target_consumer_id for event in recent_5m} | {current.target_consumer_id}),
         len({event.tool for event in recent_5m} | {current.tool}),
         block_count / completed_count if completed_count else 0.0,
-        error_count / completed_count if completed_count else 0.0,
+        error_count / len(allowed) if allowed else 0.0,
         average_interval,
         case_switches,
         financial_requests,

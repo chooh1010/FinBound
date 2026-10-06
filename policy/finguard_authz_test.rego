@@ -157,13 +157,25 @@ test_hard_request_limit_is_blocked if {
     result.reasonCodes == ["HARD_REQUEST_LIMIT_EXCEEDED"]
 }
 
-test_behavior_critical_blocks_with_valid_scope if {
+test_behavior_critical_is_allowed_and_flagged_not_blocked if {
     request := object.union(base_input, {
         "risk": object.union(base_input.risk, {"behaviorRiskLevel": "CRITICAL"}),
     })
     result := authorization.decision with input as request
+    result.decision == "ALLOW"
+    result.severity == "HIGH"
+    result.riskFlagged
+    result.reasonCodes == []
+}
+
+test_behavior_critical_still_blocks_alongside_another_deny_reason if {
+    request := object.union(base_input, {
+        "risk": object.union(base_input.risk, {"behaviorRiskLevel": "CRITICAL"}),
+        "limits": {"hardRequestLimitExceeded": true},
+    })
+    result := authorization.decision with input as request
     result.decision == "BLOCK"
-    result.reasonCodes == ["BEHAVIOR_ANOMALY"]
+    result.reasonCodes == ["HARD_REQUEST_LIMIT_EXCEEDED"]
 }
 
 test_behavior_alert_is_allowed_and_flagged if {

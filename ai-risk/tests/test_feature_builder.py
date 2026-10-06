@@ -28,8 +28,7 @@ def test_feature_builder_uses_only_completed_past_events() -> None:
             requestedData=["DEBT"],
             requestedAt=now + timedelta(seconds=1),
             decision="BLOCK",
-            success=False,
-            latencyMs=100,
+            success=None,
         ),
     ]
     current = CurrentToolCallAttempt(
@@ -49,6 +48,61 @@ def test_feature_builder_uses_only_completed_past_events() -> None:
     assert values["errorRatio5m"] == 0
     assert values["averageRequestIntervalMs"] == 30_000
     assert np.all(np.isfinite(list(values.values())))
+
+
+def _completed(
+    index: int, now: datetime, decision: str, success: bool | None
+) -> CompletedBehaviorEvent:
+    return CompletedBehaviorEvent(
+        requestId=f"REQ-{index}",
+        caseId="CASE-1",
+        targetConsumerId="CUST-1",
+        tool="CREDIT_SCORE_READ",
+        requestedData=["CREDIT_SCORE"],
+        requestedAt=now - timedelta(seconds=10 * (index + 1)),
+        decision=decision,
+        success=success,
+        latencyMs=None if decision == "BLOCK" else 100,
+    )
+
+
+def test_error_ratio_counts_failures_among_allowed_calls_only() -> None:
+    now = datetime(2026, 8, 17, 5, 0, tzinfo=UTC)
+    history = [
+        _completed(0, now, "ALLOW", True),
+        _completed(1, now, "ALLOW", False),
+        _completed(2, now, "BLOCK", None),
+        _completed(3, now, "BLOCK", None),
+    ]
+    current = CurrentToolCallAttempt(
+        caseId="CASE-1",
+        targetConsumerId="CUST-1",
+        tool="CREDIT_SCORE_READ",
+        requestedData=["CREDIT_SCORE"],
+        requestedAt=now,
+    )
+
+    values = dict(zip(FEATURE_NAMES, build_feature_vector(history, current), strict=True))
+
+    assert values["blockRatio5m"] == 0.5
+    assert values["errorRatio5m"] == 0.5
+
+
+def test_error_ratio_is_zero_when_every_call_was_blocked() -> None:
+    now = datetime(2026, 8, 17, 5, 0, tzinfo=UTC)
+    history = [_completed(index, now, "BLOCK", None) for index in range(3)]
+    current = CurrentToolCallAttempt(
+        caseId="CASE-1",
+        targetConsumerId="CUST-1",
+        tool="CREDIT_SCORE_READ",
+        requestedData=["CREDIT_SCORE"],
+        requestedAt=now,
+    )
+
+    values = dict(zip(FEATURE_NAMES, build_feature_vector(history, current), strict=True))
+
+    assert values["blockRatio5m"] == 1.0
+    assert values["errorRatio5m"] == 0.0
 
 
 def test_after_hours_uses_korean_business_timezone() -> None:

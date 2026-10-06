@@ -381,6 +381,8 @@ Isolation Forest
 → BLOCK
 ```
 
+> `loan-review-policy-2`부터 행동 CRITICAL만으로는 차단하지 않는다 — 이유와 수치는 `docs/06-common-conventions.md` §15.
+
 ### C. Defense in Depth
 
 ```text

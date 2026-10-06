@@ -15,7 +15,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.repository.AuditEventRepository;
 
 class BehaviorHistoryServiceTest {
@@ -33,17 +32,12 @@ class BehaviorHistoryServiceTest {
         "2h, 2026-08-25T10:00:00Z",
         "1d, 2026-08-24T12:00:00Z"
     })
-    void queriesOnlyCompletedEventsInsideTheRequestedWindow(String window, Instant cutoff) {
-        when(auditEvents
-                        .findByAgentIdAndStatusAndRequestedAtGreaterThanEqualOrderByRequestedAtDesc(
-                                "LOAN-AGENT-01", AuditStatus.COMPLETED, cutoff))
-                .thenReturn(List.of());
+    void queriesHistoryInsideTheRequestedWindow(String window, Instant cutoff) {
+        when(auditEvents.findBehaviorHistory("LOAN-AGENT-01", cutoff)).thenReturn(List.of());
 
         service.findCompletedEvents("LOAN-AGENT-01", window);
 
-        verify(auditEvents)
-                .findByAgentIdAndStatusAndRequestedAtGreaterThanEqualOrderByRequestedAtDesc(
-                        "LOAN-AGENT-01", AuditStatus.COMPLETED, cutoff);
+        verify(auditEvents).findBehaviorHistory("LOAN-AGENT-01", cutoff);
     }
 
     @ParameterizedTest

@@ -54,16 +54,21 @@ class BehaviorHistoryApiTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void returnsRecentCompletedAllowAndBlockEventsOnly() {
+    void returnsRecentDecidedEventsIncludingFailedExecutions() {
         String agentId = "AGENT-" + UUID.randomUUID();
         Instant now = Instant.now();
         String newestAllow =
                 insertAudit(agentId, "COMPLETED", "ALLOW", now.minusSeconds(10), true, 120L);
+        String failedAllow =
+                insertAudit(agentId, "ERROR", "ALLOW", now.minusSeconds(15), false, null);
         String olderBlock =
-                insertAudit(agentId, "COMPLETED", "BLOCK", now.minusSeconds(20), false, 30L);
+                insertAudit(agentId, "COMPLETED", "BLOCK", now.minusSeconds(20), null, null);
         insertAudit(agentId, "PROCESSING", null, now.minusSeconds(5), null, null);
-        insertAudit(agentId, "ERROR", null, now.minusSeconds(7), false, 50L);
+        insertAudit(agentId, "ERROR", null, now.minusSeconds(7), false, null);
+        insertOutcomeUnknown(agentId, now.minusSeconds(8));
         insertAudit(agentId, "COMPLETED", "ALLOW", now.minusSeconds(301), true, 80L);
+        insertAudit(agentId, "ERROR", "ALLOW", now.minusSeconds(302), false, null);
+        insertAudit("OTHER-" + UUID.randomUUID(), "ERROR", "ALLOW", now.minusSeconds(4), false, null);
         insertAudit(
                 "OTHER-" + UUID.randomUUID(),
                 "COMPLETED",
@@ -82,7 +87,7 @@ class BehaviorHistoryApiTest {
         assertThat(body.has("hardRequestLimitExceeded")).isFalse();
 
         JsonNode events = body.get("completedEvents");
-        assertThat(events).hasSize(2);
+        assertThat(events).hasSize(3);
         assertThat(events.get(0).get("requestId").asText()).isEqualTo(newestAllow);
         assertThat(events.get(0).get("caseId").asText()).isEqualTo("LOAN-2026-001");
         assertThat(events.get(0).get("targetConsumerId").asText()).isEqualTo("CUST-1001");
@@ -90,8 +95,16 @@ class BehaviorHistoryApiTest {
         assertThat(events.get(0).get("decision").asText()).isEqualTo("ALLOW");
         assertThat(events.get(0).get("success").asBoolean()).isTrue();
         assertThat(events.get(0).get("latencyMs").asLong()).isEqualTo(120L);
-        assertThat(events.get(1).get("requestId").asText()).isEqualTo(olderBlock);
-        assertThat(events.get(1).get("decision").asText()).isEqualTo("BLOCK");
+        assertThat(events.get(1).get("requestId").asText()).isEqualTo(failedAllow);
+        assertThat(events.get(1).get("decision").asText()).isEqualTo("ALLOW");
+        assertThat(events.get(1).get("success").asBoolean()).isFalse();
+        assertThat(events.get(1).get("success").isBoolean()).isTrue();
+        assertThat(events.get(1).get("latencyMs").isNull()).isTrue();
+        assertThat(events.get(2).get("requestId").asText()).isEqualTo(olderBlock);
+        assertThat(events.get(2).get("decision").asText()).isEqualTo("BLOCK");
+        // BLOCK은 실행되지 않았으므로 성공 여부가 없다 — false로 채우면 실패로 세진다.
+        assertThat(events.get(2).get("success").isNull()).isTrue();
+        assertThat(events.get(2).get("latencyMs").isNull()).isTrue();
     }
 
     @Test
@@ -158,7 +171,8 @@ class BehaviorHistoryApiTest {
                 "CREDIT_SCORE_READ",
                 decision,
                 decision == null ? null : !"BLOCK".equals(decision),
-                decision == null ? null : !"BLOCK".equals(decision),
+                // 응답은 ALLOW가 끝까지 성공했을 때만 나간다(AuditOutcomeRequest 불변식).
+                decision == null ? null : "ALLOW".equals(decision) && "COMPLETED".equals(status),
                 success,
                 success == null ? null : 1,
                 latencyMs,
@@ -167,6 +181,18 @@ class BehaviorHistoryApiTest {
                 Timestamp.from(requestedAt),
                 completedAt == null ? null : Timestamp.from(completedAt));
         return requestId;
+    }
+
+    /** OUTCOME_UNKNOWN은 결과 필드가 모두 비어야 하므로(V8 제약) PROCESSING으로 넣고 조정 배치처럼 전환한다. */
+    private void insertOutcomeUnknown(String agentId, Instant requestedAt) {
+        String requestId = insertAudit(agentId, "PROCESSING", null, requestedAt, null, null);
+        jdbcTemplate.update(
+                """
+                update audit_events
+                set status = 'OUTCOME_UNKNOWN', policy_version = null, outcome_unknown_detected_at = now()
+                where request_id = ?
+                """,
+                requestId);
     }
 
     private ResponseEntity<JsonNode> getHistory(

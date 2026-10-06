@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -57,9 +57,21 @@ class CompletedBehaviorEvent(TimezoneAwareModel):
     tool: FinancialTool
     requested_at: datetime
     decision: Decision
-    success: bool
-    latency_ms: int = Field(ge=0)
+    # BLOCK never ran, so it has no execution result (null). StrictBool keeps "false"/0 from being
+    # coerced into a failure (docs/04 §9).
+    success: StrictBool | None
+    latency_ms: int | None = Field(default=None, ge=0)
     requested_data: list[FinancialDataType] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_results_only_for_allowed_calls(self) -> "CompletedBehaviorEvent":
+        if self.decision is Decision.BLOCK and (
+            self.success is not None or self.latency_ms is not None
+        ):
+            raise ValueError("BLOCK events must not carry execution results")
+        if self.decision is Decision.ALLOW and self.success is None:
+            raise ValueError("ALLOW events require success")
+        return self
 
 
 class CurrentToolCallAttempt(TimezoneAwareModel):

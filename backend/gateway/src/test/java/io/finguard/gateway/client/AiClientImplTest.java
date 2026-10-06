@@ -15,6 +15,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
@@ -31,17 +33,20 @@ import io.finguard.gateway.dto.ScopeStatus;
 import io.finguard.gateway.dto.ToolCallRequest;
 import io.finguard.gateway.exception.AiUnavailableException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class AiClientImplTest {
 
     private WireMockServer server;
     private AiClientImpl client;
+    private SimpleMeterRegistry meters;
 
     @BeforeEach
     void setUp() {
         server = new WireMockServer(WireMockConfiguration.options().dynamicPort());
         server.start();
-        client = new AiClientImpl(server.baseUrl(), "internal-secret", 1_000);
+        meters = new SimpleMeterRegistry();
+        client = new AiClientImpl(server.baseUrl(), "internal-secret", 1_000, meters);
     }
 
     @AfterEach
@@ -143,6 +148,65 @@ class AiClientImplTest {
         String body = server.getAllServeEvents().getFirst().getRequest().getBodyAsString();
         assertThat(body).contains("REQ-COMPLETE");
         assertThat(body).doesNotContain("REQ-INCOMPLETE");
+        assertThat(meters.get("behavior.history.events.dropped").counter().count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void evaluateBehaviorPassesExecutionResultsThroughWithoutFillingBlocks() throws Exception {
+        server.stubFor(post(urlEqualTo("/internal/v1/risk/behavior"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {
+                      "behaviorRisk": 0.11,
+                      "behaviorRiskLevel": "LOW",
+                      "isAnomaly": false,
+                      "rawScore": 0.01,
+                      "historyStatus": "READY",
+                      "featureVersion": "behavior-features-2",
+                      "modelVersion": "iforest-2"
+                    }
+                    """)));
+        ToolCallRequest request = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+            List.of(FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+        ResolvedContext context = new ResolvedContext(
+            UUID.randomUUID(),
+            new ResolvedContext.References("EMP-101", "LOAN-2026-001", "PASS-001"),
+            ScopeStatus.allOk(),
+            PromptRiskSnapshot.notEvaluated());
+        BehaviorHistory history = new BehaviorHistory("LOAN-AGENT-01", "5m", List.of(
+            new BehaviorHistory.CompletedEvent(
+                "REQ-SUCCEEDED", "CASE-1", "CUST-1001", FinancialTool.CREDIT_SCORE_READ,
+                Instant.parse("2026-08-17T11:59:30Z"), PolicyDecision.ALLOW, true, 42L,
+                List.of(FinancialDataType.CREDIT_SCORE)),
+            new BehaviorHistory.CompletedEvent(
+                "REQ-FAILED", "CASE-1", "CUST-1001", FinancialTool.CREDIT_SCORE_READ,
+                Instant.parse("2026-08-17T11:59:00Z"), PolicyDecision.ALLOW, false, null,
+                List.of(FinancialDataType.CREDIT_SCORE)),
+            new BehaviorHistory.CompletedEvent(
+                "REQ-BLOCKED", "CASE-1", "CUST-1001", FinancialTool.CREDIT_SCORE_READ,
+                Instant.parse("2026-08-17T11:58:00Z"), PolicyDecision.BLOCK, null, null,
+                List.of(FinancialDataType.CREDIT_SCORE))));
+
+        client.evaluateBehavior(
+            VerifiedAgentIdentity.verified("LOAN-AGENT-01"), request, context, history,
+            "REQ-4", "trace", Instant.parse("2026-08-17T12:00:00Z"));
+
+        JsonNode events = new ObjectMapper()
+            .readTree(server.getAllServeEvents().getFirst().getRequest().getBodyAsString())
+            .get("history");
+        // 실행 실패는 false로, BLOCK은 값 없음(null)으로 간다. BLOCK을 false로 채우면 실패로 세진다.
+        assertThat(events.get(0).get("success").booleanValue()).isTrue();
+        assertThat(events.get(0).get("latencyMs").asLong()).isEqualTo(42L);
+        assertThat(events.get(1).get("success").booleanValue()).isFalse();
+        assertThat(events.get(1).get("success").isBoolean()).isTrue();
+        assertThat(events.get(1).get("latencyMs").isNull()).isTrue();
+        assertThat(events.get(2).get("decision").asText()).isEqualTo("BLOCK");
+        assertThat(events.get(2).get("success").isNull()).isTrue();
+        assertThat(events.get(2).get("latencyMs").isNull()).isTrue();
+        assertThat(meters.get("behavior.history.events.dropped").counter().count()).isZero();
     }
 
     @Test
