@@ -75,10 +75,14 @@ public class GatewayToolClient {
                 || !hasExpectedFinancialResult(response.result(), request))) {
             return Mono.error(new GatewayCallException("GATEWAY_RESPONSE_INVALID"));
         }
-        if (response.decision() == PolicyDecision.BLOCK
+        if (response.decision() != PolicyDecision.ALLOW
                 && (response.reasonCodes().isEmpty()
                 || response.reasonCodes().stream().anyMatch(String::isBlank)
                 || (response.result() != null && !response.result().isNull()))) {
+            return Mono.error(new GatewayCallException("GATEWAY_RESPONSE_INVALID"));
+        }
+        // APPROVAL은 202로만 온다. 다른 상태로 오면 Gateway가 계약과 다르게 실행했을 수 있다.
+        if ((response.decision() == PolicyDecision.APPROVAL) != (status == HttpStatus.ACCEPTED.value())) {
             return Mono.error(new GatewayCallException("GATEWAY_RESPONSE_INVALID"));
         }
         return Mono.just(response);
