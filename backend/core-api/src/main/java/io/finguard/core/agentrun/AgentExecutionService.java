@@ -1,14 +1,18 @@
 package io.finguard.core.agentrun;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import io.finguard.core.domain.AgentRun;
 import io.finguard.core.domain.AgentRunStatus;
+import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.ApprovalStatus;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
@@ -24,6 +28,12 @@ import io.finguard.core.security.CoreApiRole;
 @Service
 @Transactional(readOnly = true)
 public class AgentExecutionService {
+
+    /** 실행의 승인 요청 상태가 업무에 남기는 사유. CONSUMED·APPROVED는 사유가 아니다 — 쓰였거나 쓸 수 있다. */
+    private static final Map<ApprovalStatus, ReasonCode> APPROVAL_REASONS = Map.of(
+            ApprovalStatus.PENDING, ReasonCode.AUDIT_APPROVAL_PENDING,
+            ApprovalStatus.REJECTED, ReasonCode.AUDIT_APPROVAL_REJECTED,
+            ApprovalStatus.EXPIRED, ReasonCode.AUDIT_APPROVAL_EXPIRED);
 
     private final AgentRunRepository agentRuns;
     private final AuditEventRepository auditEvents;
@@ -57,19 +67,38 @@ public class AgentExecutionService {
         TreeSet<String> reasonCodeSet =
                 attempts.stream()
                         .flatMap(attempt -> attempt.reasonCodes().stream())
-                        .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
+                        .collect(Collectors.toCollection(TreeSet::new));
         // 결과가 도착하지 않은 시도를 빼기만 하면 "완료, 시도 0건"으로 보인다. 사유로 드러낸다 — docs/04 §3.
         if (events.stream().anyMatch(event -> event.getStatus() == AuditStatus.OUTCOME_UNKNOWN)) {
             reasonCodeSet.add(ReasonCode.AUDIT_OUTCOME_UNKNOWN.name());
         }
-        // Agent 실행은 끝났어도 승인을 기다리는 시도가 있으면 업무는 끝나지 않았다 — docs/04 §3.
-        if (approvalRequests.existsByAgentRunIdAndStatus(agentRunId, ApprovalStatus.PENDING)) {
-            reasonCodeSet.add(ReasonCode.AUDIT_APPROVAL_PENDING.name());
-        }
+        // Agent 실행은 끝났어도 승인을 기다리거나 거절·만료된 시도가 있으면 업무가 끝나지 않았다 — docs/04 §3.
+        List<ApprovalRequest> approvals =
+                approvalRequests.findByAgentRunIdOrderByCreatedAtAscApprovalRequestIdAsc(agentRunId);
+        approvals.stream()
+                .map(approval -> APPROVAL_REASONS.get(approval.getStatus()))
+                .filter(java.util.Objects::nonNull)
+                .forEach(reason -> reasonCodeSet.add(reason.name()));
         List<String> reasonCodes = List.copyOf(reasonCodeSet);
 
+        // toMap은 null 값을 받지 않는다. 옛 행처럼 값이 비어 있어도 조회가 깨지지 않게 직접 담는다.
+        Map<String, String> requestIdByAuditId = new HashMap<>();
+        events.forEach(event -> requestIdByAuditId.put(event.getAuditEventId(), event.getRequestId()));
         return new AgentExecutionResponse(
-                run.getAgentRunId(), publicStatus(run.getStatus()), reasonCodes, attempts);
+                run.getAgentRunId(),
+                publicStatus(run.getStatus()),
+                reasonCodes,
+                attempts,
+                approvals.stream().map(approval -> toApproval(approval, requestIdByAuditId)).toList());
+    }
+
+    private static AgentExecutionResponse.Approval toApproval(
+            ApprovalRequest approval, Map<String, String> requestIdByAuditId) {
+        return new AgentExecutionResponse.Approval(
+                approval.getApprovalRequestId(),
+                requestIdByAuditId.get(approval.getAuditEventId()),
+                approval.getStatus(),
+                approval.getValidUntil());
     }
 
     private static AgentRunStatus publicStatus(AgentRunStatus status) {
@@ -90,7 +119,8 @@ public class AgentExecutionService {
                 event.getScopeStatus(),
                 event.getErrorLocation(),
                 event.getRequestedAt(),
-                event.getCompletedAt());
+                event.getCompletedAt(),
+                event.getApprovalRequestId());
     }
 
 }

@@ -207,6 +207,44 @@ class ApprovalConsumeTest {
     }
 
     @Test
+    void executionViewListsTheRunsApprovalsInOrderAndTheApprovalEachAttemptUsed() {
+        // 실제 저장소 정렬과 JSON 모양을 본다. 두 요청은 생성 시각이 같아 id가 순서를 정한다.
+        Run run = startRun();
+        insertFinishedAttempt(run, "AUD-A", "REQ-A", null);
+        insertFinishedAttempt(run, "AUD-B", "REQ-B", "APR-PRIOR");
+        jdbc.update(
+                "insert into approval_requests (approval_request_id, audit_event_id, agent_id, agent_run_id,"
+                        + " target_consumer_id, requested_tool, status, created_at, version, employee_id,"
+                        + " requested_data_key, expires_at, decided_at, decided_by, valid_until) values"
+                        + " ('APR-2', 'AUD-B', 'LOAN-AGENT-01', ?, 'CUST-1001', 'CREDIT_SCORE_READ', 'APPROVED',"
+                        + " '2026-10-06T12:00:00Z', 0, 'EMP-101', 'CREDIT_SCORE', '2026-10-06T12:30:00Z',"
+                        + " '2026-10-06T12:01:00Z', 'EMP-201', '2026-10-06T12:16:00Z'),"
+                        + " ('APR-1', 'AUD-A', 'LOAN-AGENT-01', ?, 'CUST-1001', 'CREDIT_SCORE_READ', 'REJECTED',"
+                        + " '2026-10-06T12:00:00Z', 0, 'EMP-101', 'CREDIT_SCORE', '2026-10-06T12:30:00Z',"
+                        + " '2026-10-06T12:01:00Z', 'EMP-201', null)",
+                run.agentRunId(),
+                run.agentRunId());
+        Run plain = startRun();
+
+        JsonNode body = execution(run).getBody();
+        JsonNode empty = execution(plain).getBody();
+
+        assertThat(body.get("reasonCodes").toString()).contains("AUDIT_APPROVAL_REJECTED");
+        JsonNode approvals = body.get("approvals");
+        assertThat(approvals).hasSize(2);
+        assertThat(approvals.get(0).get("approvalRequestId").asText()).isEqualTo("APR-1");
+        assertThat(approvals.get(0).get("requestId").asText()).isEqualTo("REQ-A");
+        assertThat(approvals.get(0).get("status").asText()).isEqualTo("REJECTED");
+        assertThat(approvals.get(0).has("validUntil")).isFalse();
+        assertThat(approvals.get(1).get("approvalRequestId").asText()).isEqualTo("APR-2");
+        assertThat(approvals.get(1).get("validUntil").asText()).isEqualTo("2026-10-06T12:16:00Z");
+        JsonNode attempts = body.get("attempts");
+        assertThat(attempts.get(0).has("approvalRequestId")).isFalse();
+        assertThat(attempts.get(1).get("approvalRequestId").asText()).isEqualTo("APR-PRIOR");
+        assertThat(empty.get("approvals")).isEmpty();
+    }
+
+    @Test
     void anApprovalPastItsValidityIsNotUsed() {
         Run run = startRun();
         bindApproval("APR-LATE", run, "valid_until = clock_timestamp() - interval '1 second'");
@@ -280,6 +318,30 @@ class ApprovalConsumeTest {
                 auditId,
                 run.agentRunId());
         jdbc.update("update approval_requests set " + validity + " where approval_request_id = ?", approvalId);
+    }
+
+    private void insertFinishedAttempt(Run run, String auditId, String requestId, String usedApprovalId) {
+        jdbc.update(
+                "insert into audit_events (audit_event_id, request_id, agent_id, agent_run_id, status, decision,"
+                        + " severity, risk_flagged, downstream_reached, response_released, requested_at, received_at,"
+                        + " completed_at, version, approval_request_id) values (?, ?, 'LOAN-AGENT-01', ?, 'COMPLETED',"
+                        + " 'APPROVAL', 'HIGH', true, false, false, now() - interval '2 minutes', now(), now(), 0, ?)",
+                auditId,
+                requestId,
+                run.agentRunId(),
+                usedApprovalId);
+    }
+
+    private ResponseEntity<JsonNode> execution(Run run) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.AUTHORIZATION, "Bearer test-operator-credential");
+        ResponseEntity<JsonNode> response = restTemplate.exchange(
+                URI.create(base() + "/api/v1/agent-runs/" + run.agentRunId() + "/execution"),
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                JsonNode.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return response;
     }
 
     private void createAudit(Run run, String requestId) {

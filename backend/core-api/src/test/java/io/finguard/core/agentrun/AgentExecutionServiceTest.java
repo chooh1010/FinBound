@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import io.finguard.core.domain.AgentRun;
 import io.finguard.core.domain.AgentRunStatus;
+import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.ApprovalStatus;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
@@ -44,7 +45,8 @@ class AgentExecutionServiceTest {
     void marksTheRunWhileAnApprovalIsPending() {
         when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run(AgentRunStatus.COMPLETED)));
         when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1")).thenReturn(List.of());
-        when(approvalRequests.existsByAgentRunIdAndStatus("RUN-1", ApprovalStatus.PENDING)).thenReturn(true);
+        List<ApprovalRequest> pending = List.of(approval("APR-1", "AUD-3", ApprovalStatus.PENDING));
+        when(approvalRequests.findByAgentRunIdOrderByCreatedAtAscApprovalRequestIdAsc("RUN-1")).thenReturn(pending);
 
         AgentExecutionResponse response = service.find("RUN-1", viewer());
 
@@ -171,7 +173,8 @@ class AgentExecutionServiceTest {
         when(approval.getCompletedAt()).thenReturn(Instant.parse("2026-08-17T12:00:03Z"));
         when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run(AgentRunStatus.COMPLETED)));
         when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1")).thenReturn(List.of(approval));
-        when(approvalRequests.existsByAgentRunIdAndStatus("RUN-1", ApprovalStatus.PENDING)).thenReturn(true);
+        List<ApprovalRequest> pending = List.of(approval("APR-1", "AUD-3", ApprovalStatus.PENDING));
+        when(approvalRequests.findByAgentRunIdOrderByCreatedAtAscApprovalRequestIdAsc("RUN-1")).thenReturn(pending);
 
         AgentExecutionResponse response = service.find("RUN-1", viewer());
 
@@ -182,6 +185,50 @@ class AgentExecutionServiceTest {
             assertThat(attempt.responseReleased()).isFalse();
         });
         assertThat(response.reasonCodes()).containsExactly("AUDIT_APPROVAL_PENDING", "BEHAVIOR_ANOMALY");
+    }
+
+    @Test
+    void listsTheRunsApprovalsAndMarksRejectedAndExpiredOnes() {
+        AuditEvent asked = mock(AuditEvent.class);
+        when(asked.getStatus()).thenReturn(AuditStatus.COMPLETED);
+        when(asked.getAuditEventId()).thenReturn("AUD-3");
+        when(asked.getRequestId()).thenReturn("REQ-3");
+        when(asked.getRequestedData()).thenReturn(Set.of(DataType.CREDIT_SCORE));
+        when(asked.getReasonCodes()).thenReturn(Set.of());
+        AuditEvent used = mock(AuditEvent.class);
+        when(used.getStatus()).thenReturn(AuditStatus.COMPLETED);
+        when(used.getAuditEventId()).thenReturn("AUD-4");
+        when(used.getRequestId()).thenReturn("REQ-4");
+        when(used.getRequestedData()).thenReturn(Set.of(DataType.CREDIT_SCORE));
+        when(used.getReasonCodes()).thenReturn(Set.of());
+        when(used.getApprovalRequestId()).thenReturn("APR-OLD");
+        Instant validUntil = Instant.parse("2026-10-06T12:15:00Z");
+        ApprovalRequest approved = approval("APR-OK", "AUD-3", ApprovalStatus.APPROVED);
+        when(approved.getValidUntil()).thenReturn(validUntil);
+        when(agentRuns.findById("RUN-1")).thenReturn(Optional.of(run(AgentRunStatus.COMPLETED)));
+        when(auditEvents.findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc("RUN-1"))
+                .thenReturn(List.of(asked, used));
+        List<ApprovalRequest> approvals = List.of(
+                approved,
+                approval("APR-NO", "AUD-3", ApprovalStatus.REJECTED),
+                approval("APR-LATE", "AUD-3", ApprovalStatus.EXPIRED),
+                approval("APR-USED", "AUD-3", ApprovalStatus.CONSUMED));
+        when(approvalRequests.findByAgentRunIdOrderByCreatedAtAscApprovalRequestIdAsc("RUN-1")).thenReturn(approvals);
+
+        AgentExecutionResponse response = service.find("RUN-1", viewer());
+
+        // APPROVED·CONSUMED는 사유가 아니다. 거절·만료만 업무에 남는다.
+        assertThat(response.reasonCodes()).containsExactly("AUDIT_APPROVAL_EXPIRED", "AUDIT_APPROVAL_REJECTED");
+        assertThat(response.approvals()).first().satisfies(approval -> {
+            assertThat(approval.approvalRequestId()).isEqualTo("APR-OK");
+            assertThat(approval.requestId()).isEqualTo("REQ-3");
+            assertThat(approval.status()).isEqualTo(ApprovalStatus.APPROVED);
+            assertThat(approval.validUntil()).isEqualTo(validUntil);
+        });
+        assertThat(response.approvals()).hasSize(4);
+        // 승인을 써서 판정한 시도는 그 승인을 싣는다.
+        assertThat(response.attempts()).extracting(AgentExecutionResponse.Attempt::approvalRequestId)
+                .containsExactly(null, "APR-OLD");
     }
 
     @Test
@@ -219,5 +266,13 @@ class AgentExecutionServiceTest {
 
     private CoreApiPrincipal viewer() {
         return new CoreApiPrincipal(CoreApiRole.VIEWER, null);
+    }
+
+    private static ApprovalRequest approval(String approvalId, String auditEventId, ApprovalStatus status) {
+        ApprovalRequest approval = mock(ApprovalRequest.class);
+        when(approval.getApprovalRequestId()).thenReturn(approvalId);
+        when(approval.getAuditEventId()).thenReturn(auditEventId);
+        when(approval.getStatus()).thenReturn(status);
+        return approval;
     }
 }

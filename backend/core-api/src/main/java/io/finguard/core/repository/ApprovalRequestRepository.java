@@ -63,5 +63,6 @@ public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest
     @Query(value = "select clock_timestamp()", nativeQuery = true)
     Instant databaseNow();
 
-    boolean existsByAgentRunIdAndStatus(String agentRunId, ApprovalStatus status);
+    /** 이 실행에서 생긴 승인 요청. 실행 조회가 상태별 사유 코드와 목록을 만든다. */
+    List<ApprovalRequest> findByAgentRunIdOrderByCreatedAtAscApprovalRequestIdAsc(String agentRunId);
 }
