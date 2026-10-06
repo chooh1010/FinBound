@@ -137,7 +137,8 @@ class AuditOutcomeUnknownConstraintTest {
         insertCompletedAllow("AUD-U10", null, null);
         assertRejectedBy(
                 "chk_audit_policy_input_all_or_none",
-                () -> jdbc.update("update audit_events set behavior_risk_level = 'LOW' where audit_event_id = 'AUD-U10'"));
+                () -> jdbc.update(
+                        "update audit_events set behavior_risk_level = 'LOW' where audit_event_id = 'AUD-U10'"));
     }
 
     @Test

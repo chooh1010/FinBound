@@ -683,7 +683,7 @@ class AuditPersistenceApiTest {
      * 새 필드가 생겼다는 이유만으로 재전송이 409가 되면 안 된다.
      */
     @Test
-    void aResendWithPolicyInputMatchesARowStoredWithoutIt() {
+    void resendWithPolicyInputMatchesARowStoredWithoutIt() {
         String requestId = requestId();
         createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
         String withoutInput =
@@ -731,7 +731,7 @@ class AuditPersistenceApiTest {
 
     /** 판정 입력이 저장된 행에 판정 입력 없는 결과가 오면 충돌이다 — 저장된 근거를 지우는 것과 같다. */
     @Test
-    void aResendWithoutPolicyInputConflictsWithARowThatHasIt() {
+    void resendWithoutPolicyInputConflictsWithARowThatHasIt() {
         String requestId = requestId();
         createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
         assertThat(updateOutcome(requestId, "LOAN-AGENT-01", """

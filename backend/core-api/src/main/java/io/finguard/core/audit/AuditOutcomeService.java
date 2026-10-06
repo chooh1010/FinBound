@@ -79,7 +79,8 @@ public class AuditOutcomeService {
                 if (attempt >= MAX_ATTEMPTS) {
                     throw AuditOperationException.writeFailed(exception);
                 }
-                log.info("Audit outcome raced with another writer, re-reading requestId={} attempt={}", requestId, attempt);
+                log.info("Audit outcome raced with another writer, re-reading requestId={} attempt={}",
+                        requestId, attempt);
             } catch (DataAccessException exception) {
                 throw AuditOperationException.writeFailed(exception);
             }
