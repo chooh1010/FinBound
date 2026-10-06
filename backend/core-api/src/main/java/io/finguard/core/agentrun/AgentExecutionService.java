@@ -9,10 +9,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import io.finguard.core.domain.AgentRun;
 import io.finguard.core.domain.AgentRunStatus;
+import io.finguard.core.domain.ApprovalStatus;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.repository.AgentRunRepository;
+import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.finguard.core.security.CoreApiAccessDeniedException;
 import io.finguard.core.security.CoreApiPrincipal;
@@ -25,11 +27,15 @@ public class AgentExecutionService {
 
     private final AgentRunRepository agentRuns;
     private final AuditEventRepository auditEvents;
+    private final ApprovalRequestRepository approvalRequests;
 
     public AgentExecutionService(
-            AgentRunRepository agentRuns, AuditEventRepository auditEvents) {
+            AgentRunRepository agentRuns,
+            AuditEventRepository auditEvents,
+            ApprovalRequestRepository approvalRequests) {
         this.agentRuns = agentRuns;
         this.auditEvents = auditEvents;
+        this.approvalRequests = approvalRequests;
     }
 
     public AgentExecutionResponse find(String agentRunId, CoreApiPrincipal principal) {
@@ -55,6 +61,10 @@ public class AgentExecutionService {
         // 결과가 도착하지 않은 시도를 빼기만 하면 "완료, 시도 0건"으로 보인다. 사유로 드러낸다 — docs/04 §3.
         if (events.stream().anyMatch(event -> event.getStatus() == AuditStatus.OUTCOME_UNKNOWN)) {
             reasonCodeSet.add(ReasonCode.AUDIT_OUTCOME_UNKNOWN.name());
+        }
+        // Agent 실행은 끝났어도 승인을 기다리는 시도가 있으면 업무는 끝나지 않았다 — docs/04 §3.
+        if (approvalRequests.existsByAgentRunIdAndStatus(agentRunId, ApprovalStatus.PENDING)) {
+            reasonCodeSet.add(ReasonCode.AUDIT_APPROVAL_PENDING.name());
         }
         List<String> reasonCodes = List.copyOf(reasonCodeSet);
 

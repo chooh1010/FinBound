@@ -36,6 +36,8 @@ public enum ReasonCode {
     AUDIT_WRITE_FAILED,
     /** Core가 붙이는 코드다. 결과 기록이 도착하지 않은 시도가 있는 실행에 표시한다 — docs/04 §3. */
     AUDIT_OUTCOME_UNKNOWN,
+    /** Core가 붙이는 코드다. 승인을 기다리는 시도가 있는 실행에 표시한다 — docs/04 §3. */
+    AUDIT_APPROVAL_PENDING,
     SECURITY_EVENT_WRITE_FAILED,
     DOWNSTREAM_ERROR,
     DOWNSTREAM_TIMEOUT,

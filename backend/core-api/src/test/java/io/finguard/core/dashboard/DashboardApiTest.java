@@ -6,6 +6,8 @@ import java.time.Instant;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -72,6 +74,28 @@ class DashboardApiTest {
         assertThat(body.get("block").asInt()).isEqualTo(2);
         assertThat(body.get("error").asInt()).isEqualTo(1);
         assertThat(body.get("outcomeUnknown").asInt()).isZero();
+        assertThat(body.get("approval").asInt()).isZero();
+    }
+
+    /** APPROVAL은 BLOCK이 아니다. 따로 세고, 필터도 서로 섞이지 않는다. */
+    @Test
+    void approvalIsCountedAndFilteredApartFromBlock() {
+        insertAudit("AUD-001", "REQ-001", "BLOCK", "COMPLETED", "2026-08-25T10:00:00Z");
+        insertAudit("AUD-002", "REQ-002", "APPROVAL", "COMPLETED", "2026-08-25T10:01:00Z");
+
+        JsonNode summary = getAsViewer("/api/v1/dashboard/summary").getBody();
+        assertThat(summary).isNotNull();
+        assertThat(summary.get("block").asInt()).isEqualTo(1);
+        assertThat(summary.get("approval").asInt()).isEqualTo(1);
+
+        JsonNode approvals = getAsViewer("/api/v1/audit-events?outcome=APPROVAL").getBody();
+        assertThat(approvals).isNotNull();
+        assertThat(approvals.get("totalItems").asInt()).isEqualTo(1);
+        assertThat(approvals.get("items").get(0).get("auditEventId").asText()).isEqualTo("AUD-002");
+        JsonNode blocks = getAsViewer("/api/v1/audit-events?outcome=BLOCK").getBody();
+        assertThat(blocks).isNotNull();
+        assertThat(blocks.get("totalItems").asInt()).isEqualTo(1);
+        assertThat(blocks.get("items").get(0).get("auditEventId").asText()).isEqualTo("AUD-001");
     }
 
     /** 결과가 도착하지 않은 기록이 total에만 묻히면 화면에서 유실이 보이지 않는다 — docs/06 §25. */
@@ -214,16 +238,17 @@ class DashboardApiTest {
         assertThat(body.get("latencyMs").asLong()).isEqualTo(120L);
     }
 
-    @Test
-    void blockedEventHidesTheExecutionMeasurements() {
-        // BLOCK은 downstream에 닿지 않았다. 스키마가 이 셋을 금지하므로 내보내면 안 된다.
+    @ParameterizedTest
+    @ValueSource(strings = {"BLOCK", "APPROVAL"})
+    void eventsThatNeverRanTheToolHideTheExecutionMeasurements(String decision) {
+        // BLOCK·APPROVAL은 downstream에 닿지 않았다. 스키마가 이 셋을 금지하므로 내보내면 안 된다.
         // 옛 기록에 값이 남아 있어도 마찬가지다 — 계약이 우선이다.
-        insertCompletedAudit("AUD-201", "REQ-201", "BLOCK", false, 0, 18L);
+        insertCompletedAudit("AUD-201", "REQ-201", decision, false, 0, 18L);
 
         JsonNode body = getAsViewer("/api/v1/audit-events/AUD-201").getBody();
 
         assertThat(body).isNotNull();
-        assertThat(body.get("decision").asText()).isEqualTo("BLOCK");
+        assertThat(body.get("decision").asText()).isEqualTo(decision);
         // 스키마는 값이 아니라 키의 존재 자체를 금지한다("not": {"anyOf": [{"required": [...]}]}).
         // JSON Schema의 required는 값이 null이어도 "있음"으로 보므로 "success": null도 위반이다.
         assertThat(body.has("success")).isFalse();
@@ -301,7 +326,7 @@ class DashboardApiTest {
                 requestId,
                 decision,
                 severityFor(decision),
-                "BLOCK".equals(decision),
+                !"ALLOW".equals(decision),
                 success,
                 recordsRead,
                 latencyMs,
@@ -359,11 +384,15 @@ class DashboardApiTest {
                 decision,
                 status,
                 severityFor(decision),
-                "BLOCK".equals(decision),
+                !"ALLOW".equals(decision),
                 java.sql.Timestamp.from(Instant.parse(requestedAt)));
     }
 
     private String severityFor(String decision) {
-        return "BLOCK".equals(decision) ? "CRITICAL" : "LOW";
+        return switch (decision) {
+            case "BLOCK" -> "CRITICAL";
+            case "APPROVAL" -> "HIGH";
+            default -> "LOW";
+        };
     }
 }

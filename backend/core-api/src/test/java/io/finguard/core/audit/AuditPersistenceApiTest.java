@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -581,14 +583,15 @@ class AuditPersistenceApiTest {
     }
 
     /** 사유 코드 하나만 빼면 통과하는 요청이어야 이 검증을 시험한다 — 다른 이유로 400이 나면 안 된다. */
-    @Test
-    void rejectsTheCoreOnlyReasonCodeFromTheGateway() {
+    @ParameterizedTest
+    @ValueSource(strings = {"AUDIT_OUTCOME_UNKNOWN", "AUDIT_APPROVAL_PENDING"})
+    void rejectsTheCoreOnlyReasonCodeFromTheGateway(String coreOnlyCode) {
         assertOutcomeRejected(
                 """
                 {
                   "decision": "ALLOW",
                   "systemOutcome": "ERROR",
-                  "reasonCodes": ["AUDIT_OUTCOME_UNKNOWN"],
+                  "reasonCodes": ["CORE_ONLY_CODE"],
                   "downstreamReached": true,
                   "responseReleased": false,
                   "success": false,
@@ -597,7 +600,7 @@ class AuditPersistenceApiTest {
                   "riskFlagged": false,
                   "completedAt": "%s"
                 }
-                """);
+                """.replace("CORE_ONLY_CODE", coreOnlyCode));
     }
 
     /** 판정 입력 스냅샷이 오면 감사 행에 남긴다 — 감사 기록만으로 그 판정을 다시 계산할 수 있게. */

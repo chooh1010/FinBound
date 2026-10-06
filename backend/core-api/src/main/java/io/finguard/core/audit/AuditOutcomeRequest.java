@@ -69,9 +69,11 @@ public record AuditOutcomeRequest(
     }
 
     /** 결과를 아는 쪽이 "결과를 모른다"는 사유를 붙일 수는 없다. 이 코드는 Core만 붙인다. */
-    @AssertTrue(message = "AUDIT_OUTCOME_UNKNOWN is assigned by Core only")
+    @AssertTrue(message = "AUDIT_OUTCOME_UNKNOWN and AUDIT_APPROVAL_PENDING are assigned by Core only")
     public boolean isWithoutCoreOnlyReason() {
-        return reasonCodes == null || !reasonCodes.contains(ReasonCode.AUDIT_OUTCOME_UNKNOWN);
+        return reasonCodes == null
+                || (!reasonCodes.contains(ReasonCode.AUDIT_OUTCOME_UNKNOWN)
+                        && !reasonCodes.contains(ReasonCode.AUDIT_APPROVAL_PENDING));
     }
 
     /** 판정에 닿지 못한 결과(fail-closed)에는 판정 입력이 없다. 있으면 지어낸 근거다. */

@@ -9,5 +9,6 @@ package io.finguard.core.dashboard;
  * <p>{@code outcomeUnknown}은 결과 기록이 끝내 도착하지 않은 수다. 판정이 없으므로 allow·block에
  * 넣지 않고 따로 센다 — total에만 묻히면 기록 유실이 화면에서 보이지 않는다(docs/06 §25).
  */
-public record DashboardSummaryResponse(long total, long allow, long block, long error, long outcomeUnknown) {
+public record DashboardSummaryResponse(
+        long total, long allow, long block, long approval, long error, long outcomeUnknown) {
 }

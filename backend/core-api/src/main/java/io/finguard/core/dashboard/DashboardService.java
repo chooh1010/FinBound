@@ -41,8 +41,9 @@ public class DashboardService {
         long error = auditEvents.countByStatus(AuditStatus.ERROR);
         long allow = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.ALLOW);
         long block = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.BLOCK);
+        long approval = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.APPROVAL);
         long outcomeUnknown = auditEvents.countByStatus(AuditStatus.OUTCOME_UNKNOWN);
-        return new DashboardSummaryResponse(total, allow, block, error, outcomeUnknown);
+        return new DashboardSummaryResponse(total, allow, block, approval, error, outcomeUnknown);
     }
 
     public AuditEventPageResponse findEvents(AuditEventQuery query, int page, int pageSize) {
@@ -118,19 +119,26 @@ public class DashboardService {
     }
 
     /**
-     * 화면에 보이는 처리 결과. 판정(ALLOW/BLOCK)과 시스템 결과(COMPLETED/ERROR)는 다른 축인데
+     * 화면에 보이는 처리 결과. 판정(ALLOW/BLOCK/APPROVAL)과 시스템 결과(COMPLETED/ERROR)는 다른 축인데
      * 사용자에게는 한 칸으로 보이므로, ERROR가 판정을 덮는다({@code docs/06} §12).
      */
     public enum Outcome {
         ALLOW,
         BLOCK,
+        APPROVAL,
         ERROR;
 
         Specification<AuditEvent> toSpecification() {
-            if (this == ERROR) {
+            // 판정이 늘면 여기서 컴파일이 멈춘다. 예전 삼항식은 ALLOW가 아닌 모든 값을 BLOCK으로 읽었다.
+            PolicyDecision decision = switch (this) {
+                case ALLOW -> PolicyDecision.ALLOW;
+                case BLOCK -> PolicyDecision.BLOCK;
+                case APPROVAL -> PolicyDecision.APPROVAL;
+                case ERROR -> null;
+            };
+            if (decision == null) {
                 return (root, cq, cb) -> cb.equal(root.get("status"), AuditStatus.ERROR);
             }
-            PolicyDecision decision = this == ALLOW ? PolicyDecision.ALLOW : PolicyDecision.BLOCK;
             return (root, cq, cb) ->
                     cb.and(
                             cb.notEqual(root.get("status"), AuditStatus.ERROR),

@@ -66,6 +66,8 @@ class BehaviorHistoryApiTest {
         insertAudit(agentId, "PROCESSING", null, now.minusSeconds(5), null, null);
         insertAudit(agentId, "ERROR", null, now.minusSeconds(7), false, null);
         insertOutcomeUnknown(agentId, now.minusSeconds(8));
+        // APPROVAL은 행동 Feature가 정의하지 않은 판정이라 이력에 싣지 않는다(docs/04 §9).
+        insertAudit(agentId, "COMPLETED", "APPROVAL", now.minusSeconds(9), null, null);
         insertAudit(agentId, "COMPLETED", "ALLOW", now.minusSeconds(301), true, 80L);
         insertAudit(agentId, "ERROR", "ALLOW", now.minusSeconds(302), false, null);
         insertAudit("OTHER-" + UUID.randomUUID(), "ERROR", "ALLOW", now.minusSeconds(4), false, null);
@@ -170,7 +172,7 @@ class BehaviorHistoryApiTest {
                 "CUST-1001",
                 "CREDIT_SCORE_READ",
                 decision,
-                decision == null ? null : !"BLOCK".equals(decision),
+                decision == null ? null : "ALLOW".equals(decision),
                 // 응답은 ALLOW가 끝까지 성공했을 때만 나간다(AuditOutcomeRequest 불변식).
                 decision == null ? null : "ALLOW".equals(decision) && "COMPLETED".equals(status),
                 success,
