@@ -36,13 +36,13 @@ public class DashboardController {
     }
 
     @GetMapping("/api/v1/dashboard/summary")
-    @RequiresRole({CoreApiRole.VIEWER, CoreApiRole.OPERATOR})
+    @RequiresRole({CoreApiRole.VIEWER, CoreApiRole.OPERATOR, CoreApiRole.APPROVER})
     public ResponseEntity<DashboardSummaryResponse> summary() {
         return ResponseEntity.ok(dashboard.summarize());
     }
 
     @GetMapping("/api/v1/audit-events")
-    @RequiresRole({CoreApiRole.VIEWER, CoreApiRole.OPERATOR})
+    @RequiresRole({CoreApiRole.VIEWER, CoreApiRole.OPERATOR, CoreApiRole.APPROVER})
     public ResponseEntity<AuditEventPageResponse> events(
             @RequestParam(required = false) String agentId,
             @RequestParam(required = false) String caseId,
@@ -72,7 +72,7 @@ public class DashboardController {
     }
 
     @GetMapping("/api/v1/audit-events/{auditEventId}")
-    @RequiresRole({CoreApiRole.VIEWER, CoreApiRole.OPERATOR})
+    @RequiresRole({CoreApiRole.VIEWER, CoreApiRole.OPERATOR, CoreApiRole.APPROVER})
     public ResponseEntity<AuditEventView> event(@PathVariable String auditEventId) {
         return ResponseEntity.ok(dashboard.findEvent(auditEventId));
     }

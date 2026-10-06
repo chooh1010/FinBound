@@ -7,5 +7,8 @@ public enum CoreApiRole {
     VIEWER,
 
     /** Dashboard 조회에 더해 AgentRun을 생성할 수 있다. 단일 Employee에 결합된다. */
-    OPERATOR
+    OPERATOR,
+
+    /** 승인 요청을 승인·거절하고 Dashboard를 조회한다. 단일 Employee에 결합된다. 설정이 있을 때만 존재한다. */
+    APPROVER
 }
