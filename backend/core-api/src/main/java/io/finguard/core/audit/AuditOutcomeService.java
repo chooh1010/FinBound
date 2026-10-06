@@ -13,8 +13,11 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditCompletion;
 import io.finguard.core.domain.AuditEvent;
+import io.finguard.core.domain.PolicyDecision;
+import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -30,6 +33,9 @@ import io.micrometer.core.instrument.MeterRegistry;
  *   <tr><td>다른 결과로 이미 확정</td><td>409 + 경보</td></tr>
  * </table>
  *
+ * <p>{@code decision=APPROVAL} 결과가 처음 적용될 때(확정이든 해소든) 같은 트랜잭션에서 승인 요청을 만든다.
+ * 멱등 재전송과 충돌에서는 만들지 않는다 — 감사 행당 최대 하나(docs/04 §11).
+ *
  * <p>같은 행을 조정 배치가 동시에 OUTCOME_UNKNOWN으로 바꾸면 {@code @Version}이 한쪽만 이기게 한다.
  * 이 결과 쪽이 지면 새 트랜잭션에서 다시 읽고 표에 따라 다시 판단한다 — 그 행은 이제 UNKNOWN이므로
  * 해소된다. 지고 끝내면 실제 결과가 하나 더 사라진다.
@@ -43,6 +49,7 @@ public class AuditOutcomeService {
     private static final int MAX_ATTEMPTS = 3;
 
     private final AuditEventRepository auditEvents;
+    private final ApprovalRequestRepository approvalRequests;
     private final TransactionTemplate transaction;
     private final Clock clock;
     private final Counter resolvedCounter;
@@ -50,10 +57,12 @@ public class AuditOutcomeService {
 
     public AuditOutcomeService(
             AuditEventRepository auditEvents,
+            ApprovalRequestRepository approvalRequests,
             PlatformTransactionManager transactionManager,
             Clock clock,
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
+        this.approvalRequests = approvalRequests;
         this.transaction = new TransactionTemplate(transactionManager);
         // 시도마다 독립된 새 트랜잭션이다. 바깥 트랜잭션에 합류하면 재시도가 이미 rollback-only가 된
         // 같은 트랜잭션을 다시 쓰고, 커밋 전에 "커밋 뒤" 지표·경보가 나간다.
@@ -99,11 +108,11 @@ public class AuditOutcomeService {
             switch (event.getStatus()) {
                 case PROCESSING -> {
                     event.complete(completion);
-                    return Applied.of(Kind.COMPLETED, auditEvents.saveAndFlush(event));
+                    return Applied.of(Kind.COMPLETED, openApprovalIfRequired(auditEvents.saveAndFlush(event)));
                 }
                 case OUTCOME_UNKNOWN -> {
                     event.resolveOutcome(completion, clock.instant());
-                    return Applied.of(Kind.RESOLVED, auditEvents.saveAndFlush(event));
+                    return Applied.of(Kind.RESOLVED, openApprovalIfRequired(auditEvents.saveAndFlush(event)));
                 }
                 case COMPLETED, ERROR -> {
                     return Applied.of(event.hasSameOutcome(completion) ? Kind.REPEATED : Kind.CONFLICT, event);
@@ -113,6 +122,14 @@ public class AuditOutcomeService {
         } catch (IllegalArgumentException exception) {
             throw AuditOperationException.invalidOutcome();
         }
+    }
+
+    /** 처음 확정된 APPROVAL 행이면 같은 트랜잭션에서 승인 요청을 연다. 롤백되면 감사 결과와 함께 사라진다. */
+    private AuditEvent openApprovalIfRequired(AuditEvent event) {
+        if (event.getDecision() == PolicyDecision.APPROVAL) {
+            approvalRequests.saveAndFlush(ApprovalRequest.open(event, clock.instant()));
+        }
+        return event;
     }
 
     /** 지표와 경보는 커밋이 끝난 뒤에만 남긴다. 롤백된 일을 셌다면 지표가 거짓이 된다. */

@@ -20,6 +20,8 @@ final class AuditRows {
     }
 
     void reset() {
+        // 승인 요청 이벤트는 행 단위 DELETE를 트리거가 거부한다(append-only). 정리는 TRUNCATE로 한다.
+        jdbc.execute("truncate approval_request_events, approval_request_reason_codes, approval_requests");
         jdbc.update("delete from audit_event_requested_data");
         jdbc.update("delete from audit_event_reason_codes");
         jdbc.update("delete from audit_events");

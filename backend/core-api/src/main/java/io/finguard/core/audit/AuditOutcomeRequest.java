@@ -85,9 +85,9 @@ public record AuditOutcomeRequest(
         return systemOutcome != AuditStatus.COMPLETED || decision != null;
     }
 
-    @AssertTrue(message = "BLOCK must not reach downstream")
+    @AssertTrue(message = "BLOCK or APPROVAL must not reach downstream")
     public boolean isBlockStoppedBeforeDownstream() {
-        return decision != PolicyDecision.BLOCK || Boolean.FALSE.equals(downstreamReached);
+        return runsToolOrUndecided() || Boolean.FALSE.equals(downstreamReached);
     }
 
     /**
@@ -100,9 +100,9 @@ public record AuditOutcomeRequest(
      * <p>{@code false}나 {@code 0}도 값이다. "측정하지 않았음"과 "측정했더니 0"은 다른 사실이라
      * 값의 내용이 아니라 존재 여부로 판정한다.
      */
-    @AssertTrue(message = "BLOCK must not carry execution measurements")
+    @AssertTrue(message = "BLOCK or APPROVAL must not carry execution measurements")
     public boolean isBlockWithoutExecutionMeasurements() {
-        return decision != PolicyDecision.BLOCK
+        return runsToolOrUndecided()
                 || (success == null && recordsRead == null && latencyMs == null);
     }
 
@@ -128,15 +128,15 @@ public record AuditOutcomeRequest(
     // 아래 다섯도 같은 스키마의 조건부 불변식인데 그동안 빠져 있었다. 없으면 "차단했다면서
     // 응답은 내보냈다"나 "이유 없이 차단했다" 같은 거짓 사실이 감사 기록으로 남는다.
 
-    @AssertTrue(message = "BLOCK must not release a response")
+    @AssertTrue(message = "BLOCK or APPROVAL must not release a response")
     public boolean isBlockWithoutResponseRelease() {
-        return decision != PolicyDecision.BLOCK || Boolean.FALSE.equals(responseReleased);
+        return runsToolOrUndecided() || Boolean.FALSE.equals(responseReleased);
     }
 
     /** {@code @NotNull} Set은 빈 집합을 통과시킨다. 스키마는 최소 하나를 요구한다. */
-    @AssertTrue(message = "BLOCK requires at least one reason code")
+    @AssertTrue(message = "BLOCK or APPROVAL requires at least one reason code")
     public boolean isBlockExplained() {
-        return decision != PolicyDecision.BLOCK || (reasonCodes != null && !reasonCodes.isEmpty());
+        return runsToolOrUndecided() || (reasonCodes != null && !reasonCodes.isEmpty());
     }
 
     @AssertTrue(message = "ERROR must not release a response")
@@ -155,5 +155,10 @@ public record AuditOutcomeRequest(
         return decision != PolicyDecision.ALLOW
                 || systemOutcome != AuditStatus.COMPLETED
                 || (Boolean.TRUE.equals(downstreamReached) && Boolean.TRUE.equals(responseReleased));
+    }
+
+    /** BLOCK·APPROVAL처럼 Tool을 실행하지 않은 판정이 아니면 참. 실행하지 않은 판정의 규칙만 걸러 낸다. */
+    private boolean runsToolOrUndecided() {
+        return decision == null || decision.runsTool();
     }
 }

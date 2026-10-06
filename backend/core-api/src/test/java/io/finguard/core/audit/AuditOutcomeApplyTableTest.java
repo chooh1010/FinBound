@@ -206,6 +206,138 @@ class AuditOutcomeApplyTableTest {
         });
     }
 
+    @Test
+    void anApprovalOutcomeOpensOnePendingRequestInTheSameTransaction() {
+        rows.insertStaleProcessing("REQ-APPROVAL");
+
+        AuditResponse response = outcomes.updateOutcome("REQ-APPROVAL", approval(), AGENT);
+
+        assertThat(response.status()).isEqualTo(AuditStatus.COMPLETED);
+        assertThat(rows.text("decision", "REQ-APPROVAL")).isEqualTo("APPROVAL");
+        assertThat(approvalRows("REQ-APPROVAL")).containsExactly("PENDING");
+        assertThat(jdbc.queryForList(
+                        "select e.sequence || ':' || e.event_type || ':' || e.actor_type || ':'"
+                                + " || coalesce(e.actor_id, '-')"
+                                + " from approval_request_events e join approval_requests r"
+                                + " on r.approval_request_id = e.approval_request_id"
+                                + " where r.audit_event_id = 'AUD-REQ-APPROVAL'",
+                        String.class))
+                .containsExactly("1:REQUESTED:SYSTEM:-");
+        assertThat(jdbc.queryForList(
+                        "select c.reason_code from approval_request_reason_codes c join approval_requests r"
+                                + " on r.approval_request_id = c.approval_request_id"
+                                + " where r.audit_event_id = 'AUD-REQ-APPROVAL'",
+                        String.class))
+                .containsExactly("BEHAVIOR_ANOMALY");
+    }
+
+    @Test
+    void reSendingTheApprovalOrConflictingWithItOpensNoSecondRequest() {
+        rows.insertStaleProcessing("REQ-APPROVAL-AGAIN");
+        AuditOutcomeRequest outcome = approval();
+        outcomes.updateOutcome("REQ-APPROVAL-AGAIN", outcome, AGENT);
+
+        outcomes.updateOutcome("REQ-APPROVAL-AGAIN", outcome, AGENT);
+        assertThatThrownBy(() -> outcomes.updateOutcome("REQ-APPROVAL-AGAIN", block(), AGENT))
+                .isInstanceOf(AuditOperationException.class)
+                .extracting("kind")
+                .isEqualTo(AuditOperationException.Kind.DUPLICATE);
+
+        assertThat(approvalRows("REQ-APPROVAL-AGAIN")).containsExactly("PENDING");
+        assertThat(eventCount("REQ-APPROVAL-AGAIN")).isEqualTo(1);
+    }
+
+    @Test
+    void lateApprovalResolvesTheUnknownRowAndOpensTheRequest() {
+        rows.insertStaleProcessing("REQ-APPROVAL-LATE");
+        reconciler.reconcileOnce();
+
+        outcomes.updateOutcome("REQ-APPROVAL-LATE", approval(), AGENT);
+
+        assertThat(rows.text("status", "REQ-APPROVAL-LATE")).isEqualTo("COMPLETED");
+        assertThat(rows.instant("outcome_resolved_at", "REQ-APPROVAL-LATE")).isNotNull();
+        assertThat(approvalRows("REQ-APPROVAL-LATE")).containsExactly("PENDING");
+    }
+
+    @Test
+    void whenTheRequestCannotBeOpenedTheAuditOutcomeRollsBackWithIt() {
+        // 같은 트랜잭션이라는 증거: 감사 결과와 승인 요청 행이 이미 쓰인 뒤, 마지막 이벤트 저장에서 실패시킨다.
+        // 따로 커밋됐다면 감사 결과나 승인 요청이 남는다.
+        rows.insertStaleProcessing("REQ-APPROVAL-ROLLBACK");
+        jdbc.execute("create function fail_approval_event() returns trigger language plpgsql as"
+                + " $$ begin raise exception 'injected approval event failure'; end; $$");
+        jdbc.execute("create trigger trg_fail_approval_event before insert on approval_request_events"
+                + " for each row execute function fail_approval_event()");
+        try {
+            assertThatThrownBy(() -> outcomes.updateOutcome("REQ-APPROVAL-ROLLBACK", approval(), AGENT))
+                    .isInstanceOf(AuditOperationException.class)
+                    .extracting("reasonCode")
+                    .isEqualTo("AUDIT_WRITE_FAILED");
+        } finally {
+            jdbc.execute("drop trigger trg_fail_approval_event on approval_request_events");
+            jdbc.execute("drop function fail_approval_event()");
+        }
+
+        assertThat(rows.text("status", "REQ-APPROVAL-ROLLBACK")).isEqualTo("PROCESSING");
+        assertThat(rows.text("decision", "REQ-APPROVAL-ROLLBACK")).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from approval_requests", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from approval_request_reason_codes", Integer.class))
+                .isZero();
+        assertThat(jdbc.queryForObject("select count(*) from approval_request_events", Integer.class)).isZero();
+    }
+
+    @Test
+    void approvalRequestEventsCannotBeChangedOrDeleted() {
+        rows.insertStaleProcessing("REQ-APPROVAL-IMMUTABLE");
+        outcomes.updateOutcome("REQ-APPROVAL-IMMUTABLE", approval(), AGENT);
+
+        assertThatThrownBy(() -> jdbc.update("update approval_request_events set sequence = 2"))
+                .hasMessageContaining("append-only");
+        assertThatThrownBy(() -> jdbc.update("delete from approval_request_events"))
+                .hasMessageContaining("append-only");
+        assertThat(eventCount("REQ-APPROVAL-IMMUTABLE")).isEqualTo(1);
+    }
+
+    @Test
+    void nonApprovalOutcomesOpenNoRequest() {
+        rows.insertStaleProcessing("REQ-NO-APPROVAL");
+
+        outcomes.updateOutcome("REQ-NO-APPROVAL", block(), AGENT);
+
+        assertThat(approvalRows("REQ-NO-APPROVAL")).isEmpty();
+    }
+
+    private java.util.List<String> approvalRows(String requestId) {
+        return jdbc.queryForList(
+                "select status from approval_requests where audit_event_id = ?", String.class, "AUD-" + requestId);
+    }
+
+    private int eventCount(String requestId) {
+        return jdbc.queryForObject(
+                "select count(*) from approval_request_events e join approval_requests r"
+                        + " on r.approval_request_id = e.approval_request_id where r.audit_event_id = ?",
+                Integer.class,
+                "AUD-" + requestId);
+    }
+
+    private static AuditOutcomeRequest approval() {
+        return new AuditOutcomeRequest(
+                PolicyDecision.APPROVAL,
+                AuditStatus.COMPLETED,
+                Set.of(ReasonCode.BEHAVIOR_ANOMALY),
+                false,
+                false,
+                null,
+                null,
+                null,
+                null,
+                new BigDecimal("1.0000"),
+                Severity.HIGH,
+                true,
+                "loan-review-policy-3",
+                Instant.now());
+    }
+
     private double counter(String name) {
         return meterRegistry.get(name).counter().count();
     }

@@ -52,22 +52,23 @@ public record AuditCompletion(
         }
         // contracts/audit/execution-outcome.schema.json:48-104의 조건부 불변식.
         // 이걸 걸지 않으면 스키마가 금지한 상태가 감사 기록으로 남는다 — 거짓 증거가 된다.
-        if (decision == PolicyDecision.BLOCK) {
+        // BLOCK과 APPROVAL은 Tool을 실행하지 않은 판정이다. 같은 규칙을 따른다.
+        if (decision != null && !decision.runsTool()) {
             if (downstreamReached) {
-                throw new IllegalArgumentException("Blocked audit cannot reach downstream");
+                throw new IllegalArgumentException("A decision that did not run the tool cannot reach downstream");
             }
             if (responseReleased) {
-                throw new IllegalArgumentException("Blocked audit cannot release a response");
+                throw new IllegalArgumentException("A decision that did not run the tool cannot release a response");
             }
             if (reasonCodes == null || reasonCodes.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Blocked audit requires at least one reason code");
+                        "A decision that did not run the tool requires at least one reason code");
             }
             // downstream에 닿지 않았으므로 실행 측정값이 존재할 수 없다. 두 스키마가 함께 금지한다.
             // false나 0도 값이다 — "측정하지 않았음"과 "측정했더니 0"은 다른 사실이다.
             if (success != null || recordsRead != null || latencyMs != null) {
                 throw new IllegalArgumentException(
-                        "Blocked audit cannot carry execution measurements");
+                        "A decision that did not run the tool cannot carry execution measurements");
             }
         }
         if (systemOutcome == AuditStatus.ERROR) {
