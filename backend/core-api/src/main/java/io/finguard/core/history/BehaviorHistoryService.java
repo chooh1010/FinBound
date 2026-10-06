@@ -11,10 +11,9 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.repository.AuditEventRepository;
 
-/** 완료된 Business Audit만 AI용 행동 이력으로 투영한다. */
+/** 판정이 끝난 Business Audit(COMPLETED, 실행에 실패한 ALLOW·ERROR)을 AI용 행동 이력으로 투영한다. */
 @Service
 public class BehaviorHistoryService {
 
@@ -39,10 +38,7 @@ public class BehaviorHistoryService {
         }
 
         List<BehaviorHistoryResponse.CompletedEvent> completedEvents =
-                auditEvents
-                        .findByAgentIdAndStatusAndRequestedAtGreaterThanEqualOrderByRequestedAtDesc(
-                                agentId, AuditStatus.COMPLETED, cutoff)
-                        .stream()
+                auditEvents.findBehaviorHistory(agentId, cutoff).stream()
                         .map(BehaviorHistoryResponse.CompletedEvent::from)
                         .toList();
         return new BehaviorHistoryResponse(agentId, windowValue, completedEvents);

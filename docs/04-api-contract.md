@@ -708,6 +708,18 @@ GET /internal/v1/agents/{agentId}/behavior-history?window=5m
 }
 ```
 
+`completedEvents`에는 판정이 끝난 행만 싣는다: `COMPLETED`(ALLOW·BLOCK)와, 허용된 뒤 실행에서 실패한 `ERROR`+`ALLOW`.
+판정 전 오류(`decision` 없음), `PROCESSING`, `OUTCOME_UNKNOWN`은 결과를 모르므로 싣지 않는다.
+
+| 행 | `decision` | `success` | `latencyMs` |
+|---|---|---|---|
+| 실행 성공 | `ALLOW` | `true` | 값 또는 `null` |
+| 실행 실패 | `ALLOW` | `false` | 값 또는 `null` |
+| 차단 | `BLOCK` | `null` | `null` |
+
+BLOCK은 실행되지 않았으므로 `success`가 없다(`null`). 소비자는 이를 `false`로 바꾸지 않는다 — 바꾸면 정상 차단이
+실행 실패로 세진다(`errorRatio5m`, `docs/03-ai-spec.md` §8).
+
 Gateway와 FastAPI는 Behavior History를 위해 DB를 직접 조회하지 않는다.
 
 ---
