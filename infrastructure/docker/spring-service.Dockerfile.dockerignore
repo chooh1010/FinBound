@@ -15,3 +15,6 @@
 !backend/gateway/src/
 !backend/gateway/src/main/
 !backend/gateway/src/main/**
+!backend/alert-worker/src/
+!backend/alert-worker/src/main/
+!backend/alert-worker/src/main/**

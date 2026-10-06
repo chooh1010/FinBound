@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Compose-only Core/Gateway builder. Module owners retain their standalone images.
+# Compose-only Core/Gateway/alert-worker builder. Module owners retain their standalone images.
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /workspace
 ARG SERVICE_MODULE
@@ -7,7 +7,7 @@ COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle gradle
 COPY naver-checkstyle.xml naver-checkstyle-suppressions.xml ./
 COPY backend backend
-RUN case "$SERVICE_MODULE" in core-api|gateway) ;; *) exit 64 ;; esac \
+RUN case "$SERVICE_MODULE" in core-api|gateway|alert-worker) ;; *) exit 64 ;; esac \
     && chmod +x gradlew
 RUN --mount=type=cache,id=finguard-gradle,target=/root/.gradle,sharing=locked \
     ./gradlew ":backend:${SERVICE_MODULE}:bootJar" --no-daemon \

@@ -98,6 +98,31 @@ Compose secret은 Docker/호스트 관리자에게서 비밀을 숨기는 경계
 관리자는 런타임 환경·secret 파일을 읽을 수 있습니다.
 참고: [Docker Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/).
 
+## 이벤트 피드와 경보 워커 (선택)
+
+Core는 감사 결과 확정과 승인 전이를 이벤트 v2로 아웃박스에 남기고 `GET /feed/v1/events`로 내보낸다(docs/04 §18).
+경보 워커(`alert-worker`)는 그 피드만 읽고 자기 데이터베이스(`finguard_alerts`)에 상태를 둔다. 선택 기능이라 overlay로
+둔다 — 기본 스택(`docker-compose.yml`만)은 바뀌지 않는다.
+
+```bash
+# .env에 둘 값(예시 파일에는 아직 없다 — 직접 추가한다)
+EVENT_FEED_CREDENTIAL=<피드 전용 읽기 Credential, 내부 Credential과 달라야 한다>
+ALERT_WORKER_DB_PASSWORD=<워커 데이터베이스 역할 비밀번호>
+
+docker compose -f docker-compose.yml -f docker-compose.events.yml up -d
+```
+
+- 두 값은 compose secret이다. `docker compose config`에 값이 나오지 않는다. 컨테이너 안에서는 파일로 받고 Spring이
+  configtree로 읽는다(`/run/finguard-config/<속성 이름>`).
+- 새 PostgreSQL 볼륨이면 `postgres-init/20-alert-worker.sh`가 워커 역할과 데이터베이스를 만든다.
+- **기존 볼륨이면 지우지 말고** 한 번 실행한다(멱등):
+  `docker compose -f docker-compose.yml -f docker-compose.events.yml exec -T postgres sh /docker-entrypoint-initdb.d/20-alert-worker.sh`
+- 워커 역할은 superuser가 아니고 Core·`postgres`·`template1` 데이터베이스에 접속할 수 없다(CONNECT 회수). **반대 방향은
+  막지 못한다** — 이 compose의 Core는 PostgreSQL superuser로 접속한다(기존 구성). 양방향으로 막으려면 Core를 superuser가
+  아닌 역할로 옮겨야 한다(백로그).
+- 워커가 믿을 수 없는 이벤트나 거부된 요청에서 멈추면 health가 DOWN이 되고 `integrity_incidents`에 위치·사유가 남는다.
+  원인을 고친 뒤 재시작하면 체크포인트부터 다시 읽는다.
+
 ## 빌드 및 readiness
 
 Agent/Mock Finance는 #61 Dockerfile을 재사용합니다. Core/Gateway는 infrastructure의 공통
