@@ -88,6 +88,21 @@ class AuditRuntimeContractTest {
                 "execution-outcome.allow-with-policy-input.valid.json"
             ),
             Arguments.of(
+                "승인을 써서 허용된 결과는 판정 입력에 approvalGranted를 남김",
+                "execution-outcome.schema.json",
+                "execution-outcome.allow-with-approval.valid.json"
+            ),
+            Arguments.of(
+                "승인 없이 판정한 결과는 approvalGranted=false",
+                "execution-outcome.schema.json",
+                "execution-outcome.approval-not-granted.valid.json"
+            ),
+            Arguments.of(
+                "판정 전에 실패해도 이미 쓴 승인과 연결은 남음",
+                "audit-event.schema.json",
+                "audit-event.error-with-consumed-approval.valid.json"
+            ),
+            Arguments.of(
                 "인증 성공 직후 PROCESSING Business Audit 생성",
                 "audit-event.schema.json",
                 "audit-event.processing.valid.json"
@@ -231,6 +246,21 @@ class AuditRuntimeContractTest {
                 "판정 입력 스냅샷의 일부 누락 차단",
                 "execution-outcome.schema.json",
                 "execution-outcome.policy-input-partial.invalid.json"
+            ),
+            Arguments.of(
+                "approvalGranted가 boolean이 아님",
+                "execution-outcome.schema.json",
+                "execution-outcome.approval-granted-not-boolean.invalid.json"
+            ),
+            Arguments.of(
+                "approvalGranted가 null",
+                "execution-outcome.schema.json",
+                "execution-outcome.approval-granted-null.invalid.json"
+            ),
+            Arguments.of(
+                "빈 approvalRequestId",
+                "audit-event.schema.json",
+                "audit-event.approval-request-id-empty.invalid.json"
             ),
             Arguments.of(
                 "Gateway 결과 입력의 OUTCOME_UNKNOWN 차단",

@@ -36,10 +36,15 @@ P0에서는 Core가 관리하는 opaque Bearer Credential을 사용한다. Crede
 |---|---|---|
 | `VIEWER_CREDENTIAL` | §15 Dashboard 조회 Endpoint | 없음 |
 | `OPERATOR_CREDENTIAL` | AgentRun 생성 `POST /api/v1/agent-runs`와 Dashboard 조회 | Core 설정의 단일 Employee ID |
+| `APPROVER_CREDENTIAL` (선택) | 승인 요청 조회·승인·거절(§15.1), Dashboard 조회, `GET /api/v1/me` | Core 설정의 단일 Employee ID(`APPROVER_EMPLOYEE_ID`) |
 
 - `/api/v1/**`에는 인증 없는 기본 경로를 두지 않는다.
 - `VIEWER_CREDENTIAL`로 AgentRun을 생성할 수 없다.
-- 두 Credential은 필수이며 비어 있거나 서로 같으면 Core 기동에 실패한다.
+- Viewer·Operator Credential은 필수이며 비어 있거나 서로 같으면 Core 기동에 실패한다.
+- Approver Credential과 Approver Employee ID는 **둘 다 있거나 둘 다 없어야 한다.** 하나만 있으면 기동에 실패한다.
+  없으면 APPROVER 역할이 없고 승인 API는 `401`이다. 있으면 세 Credential이 서로 달라야 하고, Approver Employee는
+  Operator Employee와 달라야 한다(직무 분리 — 요청한 직원이 스스로 승인하지 못한다).
+- 역할은 Endpoint마다 허용 목록으로 정한다. 상위 역할이 하위 역할 권한을 물려받지 않는다.
 - `OPERATOR_EMPLOYEE_ID`가 비어 있으면 Core 기동에 실패한다.
 - Credential은 Vue 소스·빌드 산출물·Web Storage에 넣지 않고 P0 실행 시 메모리에만 전달한다.
 - Credential 원문은 Request Body, 로그, Audit에 남기지 않는다.
@@ -101,9 +106,16 @@ POST /api/v1/agent-runs
   "consumerId": "CUST-1001",
   "taskType": "LOAN_REVIEW",
   "inputText": "CUST-1001의 대출심사를 진행해줘.",
-  "scenario": "NORMAL_CREDIT_SCORE"
+  "scenario": "NORMAL_CREDIT_SCORE",
+  "approvalRequestId": "APR-..."
 }
 ```
+
+`approvalRequestId`(선택)는 **승인된 요청을 다시 실행할 때만** 보낸다(§15.1). Core는 실행을 만들기 전에 그 승인을
+잠그고 다음이 모두 원래 요청과 같은지 확인한다: 요청 직원 = 호출 직원, 고객, 업무 종류, 입력 해시, 그리고 승인 상태가
+`APPROVED`이고 `valid_until`이 지나지 않았으며 다른 실행에 묶이지 않았을 것. 하나라도 다르면 실행을 만들지 않고
+`409 APPROVAL_NOT_APPLICABLE`이다. 맞으면 승인을 이 실행에만 묶는다(BOUND). 도구·자료 일치는 Agent가 실제로 부른
+호출에서 Context Resolve가 다시 확인한다 — 다르면 승인을 쓰지 않는다.
 
 > **제안 — 팀 확정 필요.** `scenario`는 이번 PR에서 추가한 필드다. `docs/05` §15에 따라 Contract 파일은
 > 합의 후 지정 편집자가 수정하므로, 여기서는 구현과 문서가 어긋나지 않도록 함께 올리고 리뷰에서 확정한다.
@@ -206,6 +218,9 @@ Viewer는 Dashboard와 같은 읽기 전용 범위에서 전체 실행을 조회
 - `OUTCOME_UNKNOWN` AuditEvent도 결과가 없으므로 `attempts`에 싣지 않는다. 대신 실행의
   `reasonCodes`에 `AUDIT_OUTCOME_UNKNOWN`을 넣어, 시도가 0건인 "완료"로 보이지 않게 한다.
   결과가 늦게 도착해 확정되면 그 시도는 `attempts`에 나타나고 이 코드는 빠진다.
+- 이 실행에서 생긴 승인 요청은 `approvals: [{"approvalRequestId", "requestId", "status", "validUntil"}]`로 함께 싣는다.
+  `status=APPROVED`이고 `validUntil`이 남아 있으면 Operator가 그 id로 다시 실행할 수 있다(§3 Request). 승인을 써서
+  판정한 시도는 `approvalRequestId`를 함께 싣는다.
 - `decision=APPROVAL` 시도는 `systemOutcome=COMPLETED`, `downstreamReached=false`, `responseReleased=false`로
   `attempts`에 싣는다(실행하지 않았으므로 측정값 없음). 그 승인 요청이 아직 `PENDING`이면 실행의 `reasonCodes`에
   `AUDIT_APPROVAL_PENDING`을 넣는다 — Agent 실행 자체는 끝났어도(`COMPLETED`) 업무가 끝난 것은 아니다.
@@ -521,9 +536,10 @@ documentText
 
 ### APPROVAL Response
 
-정책이 사람의 확인을 요구했다(`loan-review-policy-3`: 행동 위험 CRITICAL이고 다른 차단 사유가 없을 때).
+정책이 사람의 확인을 요구했다(`loan-review-policy-3`부터: 행동 위험 CRITICAL이고 다른 차단 사유와 쓸 승인이 없을 때).
 Gateway는 Tool을 실행하지 않는다. Core는 감사 결과를 적용하는 트랜잭션에서 승인 요청(`PENDING`)을 만든다.
-승인·거절·만료와 승인 후 재개는 아직 없다 — 이 응답은 자동 재개를 약속하지 않는다. `requestId`가 조회 기준이다.
+APPROVER가 승인하면 직원이 그 승인을 지정해 업무를 **다시 실행**할 수 있다(§3, §15.1) — 이 응답은 자동 재개를 약속하지
+않는다. `requestId`가 조회 기준이다.
 
 ```json
 {
@@ -637,6 +653,14 @@ POST /internal/v1/context/resolve
 ```
 
 Context Resolver가 Scope 비교의 Single Source of Truth다.
+
+이 실행에 승인이 묶여 있으면 응답에 `"approval": {"approvalRequestId": "APR-...", "granted": true}`를 싣는다. Core는
+같은 트랜잭션에서 승인을 잠그고, `APPROVED`·미사용·`valid_until > DB now()`·도구와 자료 집합 일치를 다시 확인한 뒤
+`CONSUMED`로 바꾸고 이번 감사 행에 `approvalRequestId`를 적는다. 묶인 승인이 없거나 조건이 맞지 않으면
+`"approval": {"granted": false}`다. 승인은 **최대 한 번** 쓰인다 — 이후 OPA가 막거나 장애가 나도 되돌려 주지 않는다
+(되돌려 주면 같은 승인으로 다시 실행할 수 있게 된다). 사용은 설정 `finguard.approval.consume.enabled`(기본 `false`)가 켜졌을 때만 한다. 꺼져 있으면 묶인 승인이 있어도
+`{"granted": false}`이고 승인은 그대로 남는다. 배포는 Core → Gateway → `loan-review-policy-4` 순서로 올린 뒤 이 설정을 켠다 —
+먼저 켜면 옛 정책이 승인을 무시하는 동안 승인만 소진된다.
 
 `evaluationStatus`는 `EVALUATED` 또는 `NOT_EVALUATED`다. **`detected: false` 하나만으로는
 "검사했고 음성"과 "검사하지 않았음"이 구분되지 않는다.** Audit이 이 프로젝트의 산출물이므로
@@ -923,6 +947,8 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
   오면 같은 결과(200, 저장값 그대로)로 본다 — 새 필드가 생겼다는 이유로 재전송이 충돌이 되지 않게. 반대로 판정 입력이
   저장된 행에 다른 값이나 판정 입력 없는 결과가 오면 `409`다 — 저장된 근거를 조용히 지우거나 바꾸지 않는다.
 - `behaviorAnomalyDetected`는 현재 정책이 읽지 않는다. 기록만 한다.
+- `approvalGranted`(선택, `loan-review-policy-4`부터)는 생략과 `false`를 같은 값으로 본다. 그래서 생략한 결과와
+  `false`인 결과는 같은 결과(200)다. 한쪽만 `true`면 다른 결과(`409`)다 — 승인 사용 여부는 바꿀 수 없는 근거다.
 
 `systemOutcome`은 `COMPLETED | ERROR`만 받는다. `PROCESSING`과 `OUTCOME_UNKNOWN`은 `400`으로
 거부한다 — `OUTCOME_UNKNOWN`은 Core만 기록하는 상태다(docs/06 §10).
@@ -1009,10 +1035,17 @@ POST /v1/data/finguard/authorization/decision
     },
     "limits": {
       "hardRequestLimitExceeded": false
+    },
+    "approval": {
+      "granted": false
     }
   }
 }
 ```
+
+`approval.granted`(boolean, `loan-review-policy-4`부터 필수)는 Context Resolve가 이 호출에 승인을 썼는지다. 모양이
+틀리면 `CONTEXT_NOT_FOUND`로 BLOCK한다. 차단 사유가 없고 행동 위험이 CRITICAL이어도 `granted=true`면 `ALLOW`다.
+차단 사유는 승인보다 우선한다.
 
 ### Response
 
@@ -1227,9 +1260,9 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 
 | Endpoint | 허용 Credential |
 |---|---|
-| `GET /api/v1/audit-events` | Viewer 또는 Operator |
-| `GET /api/v1/audit-events/{auditEventId}` | Viewer 또는 Operator |
-| `GET /api/v1/dashboard/summary` | Viewer 또는 Operator |
+| `GET /api/v1/audit-events` | Viewer, Operator 또는 Approver |
+| `GET /api/v1/audit-events/{auditEventId}` | Viewer, Operator 또는 Approver |
+| `GET /api/v1/dashboard/summary` | Viewer, Operator 또는 Approver |
 | `GET /api/v1/agent-runs/{agentRunId}/execution` | Viewer 또는 Operator. Operator는 본인 실행만 |
 | `GET /api/v1/agent-runs/{agentRunId}/permission-comparison` | Viewer 또는 Operator |
 
@@ -1244,6 +1277,57 @@ Vue는 PostgreSQL을 직접 조회하지 않는다.
 OPA 판정 시점에 기록된 `severity`와 `riskFlagged` 감사 필드를 사용한다.
 
 ---
+
+### 15.1 Approval API
+
+```http
+GET  /api/v1/approval-requests?status=PENDING
+POST /api/v1/approval-requests/{approvalRequestId}/approve   {"note": "선택"}
+POST /api/v1/approval-requests/{approvalRequestId}/reject    {"note": "선택"}
+GET  /api/v1/me                                              → {"role": "APPROVER", "employeeId": "EMP-201"}
+```
+
+APPROVER만 승인 API를 부른다(`/me`는 모든 역할). 다른 역할의 유효한 Credential은 `403 CORE_API_ROLE_FORBIDDEN`,
+Credential이 없거나 틀리면 `401`이다(§2). 승인자 설정이 없으면 APPROVER 역할이 없을 뿐 다른 역할은 그대로 동작한다.
+
+목록: `status`는 `PENDING | APPROVED | REJECTED | EXPIRED | CONSUMED`(생략하면 `PENDING`, 그 밖의 값은 `400`), 최신순
+최대 100건. 승인·거절은 `200`과 바뀐 항목 하나를 돌려준다. `/me`는 `{"role", "employeeId"}`이고 Viewer의 `employeeId`는 `null`.
+
+```json
+{
+  "items": [
+    {
+      "approvalRequestId": "APR-...",
+      "requestId": "REQ-...",
+      "agentRunId": "RUN-...",
+      "requesterEmployeeId": "EMP-101",
+      "targetConsumerId": "CUST-1001",
+      "requestedTool": "CREDIT_SCORE_READ",
+      "requestedData": ["CREDIT_SCORE"],
+      "reasonCodes": ["BEHAVIOR_ANOMALY"],
+      "status": "PENDING",
+      "createdAt": "...",
+      "expiresAt": "...",
+      "decidedAt": null,
+      "decidedBy": null,
+      "validUntil": null
+    }
+  ]
+}
+```
+
+항목은 식별자·사유·도구·자료 종류·상태·시각만 담는다 — 원문 Prompt와 금융 값은 담지 않는다(docs/06 §24).
+
+| 상황 | 응답 |
+|---|---|
+| 요청한 직원 본인이 승인·거절 | `403 APPROVAL_SELF_DECISION` |
+| `PENDING`이 아니거나 `expires_at`이 지남(DB 시각) | `409 APPROVAL_NOT_PENDING` |
+| 없음 | `404` |
+
+상태: `PENDING → APPROVED | REJECTED | EXPIRED`, `APPROVED → CONSUMED | EXPIRED`. 승인하면 `valid_until`(기본 15분)이
+붙는다. `PENDING`은 기본 30분 뒤, 쓰이지 않은 `APPROVED`는 `valid_until` 뒤 만료 배치가 `EXPIRED`로 바꾼다.
+모든 전이는 승인 요청 행을 잠그고 상태와 기한을 DB 시각으로 다시 확인한 뒤 하고, append-only 이벤트
+(`REQUESTED, APPROVED, REJECTED, EXPIRED, BOUND, CONSUMED`)를 하나씩 남긴다.
 
 ## 16. Error / Fail-closed
 
@@ -1268,6 +1352,10 @@ OPA 판정 시점에 기록된 `severity`와 `riskFlagged` 감사 필드를 사�
 동일 Request ID
 → 실제 Downstream 실행 최대 1회
 ```
+
+Gateway는 같은 Request ID의 응답을 10분 동안 돌려준다. 단 **인증된 Agent 신원과 요청 내용 지문**(agentRunId,
+passportId, tool, targetConsumerId, 정렬한 requestedData, action의 SHA-256)이 처음 요청과 같을 때만이다. 다르면
+`409 DUPLICATE_REQUEST`로 거부한다 — 호출자가 고른 Request ID만으로 다른 요청의 응답을 받아 가지 못하게 한다.
 
 Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 않아야 한다.
 
