@@ -1,8 +1,17 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
 import { configureFinboundApi, finboundApi, mapAuditEvent, resetFinboundApi } from './services/finboundApi'
+
+// 시험마다 화면을 내린다. 알림함의 30초 타이머가 다음 시험으로 새지 않게.
+enableAutoUnmount(afterEach)
+
+// 로그인 뒤 알림함이 안 읽은 수를 묻는다. 응답 순서를 정해 둔 기존 시험이 그 요청에 흔들리지 않게 기본은 0으로 둔다.
+// 알림함 시험은 이 대역을 풀고 실제 요청을 본다.
+beforeEach(() => {
+  vi.spyOn(finboundApi, 'getUnreadNotificationCount').mockResolvedValue(0)
+})
 
 afterEach(() => {
   resetFinboundApi()
@@ -933,5 +942,129 @@ describe('human approval screens', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-approval="APR-1"]').exists()).toBe(false)
+  })
+})
+
+describe('notification inbox', () => {
+  const jsonResponse = (body, status = 200) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => (body === undefined ? '' : JSON.stringify(body)),
+  })
+  const byPath = (routes) => vi.fn(async (url, options) => {
+    const path = new URL(url, 'http://local').pathname + new URL(url, 'http://local').search
+    const key = `${options?.method ?? 'GET'} ${path}`
+    const route = routes[key]
+    if (!route) throw new Error(`unexpected request ${key}`)
+    return typeof route === 'function' ? route() : route
+  })
+
+  async function startSession(wrapper, credential) {
+    await wrapper.get('#core-credential').setValue(credential)
+    await wrapper.get('.credential-panel form').trigger('submit')
+    await flushPromises()
+  }
+
+  it('shows the unread count, lists the inbox and marks an item read', async () => {
+    finboundApi.getUnreadNotificationCount.mockRestore()
+    const fetchImpl = byPath({
+      'GET /api/v1/me': jsonResponse({ role: 'APPROVER', employeeId: 'EMP-201' }),
+      'GET /api/v1/approval-requests?status=PENDING': jsonResponse({ items: [] }),
+      'GET /api/v1/notifications/unread-count': (() => {
+        let calls = 0
+        // 읽음 처리 전에는 1, 뒤에는 0. 숫자는 서버에서 다시 읽는다.
+        return () => jsonResponse({ unread: calls++ < 2 ? 1 : 0 })
+      })(),
+      'GET /api/v1/notifications?unreadOnly=true': jsonResponse({ items: [{
+        notificationId: 7, kind: 'APPROVAL_REQUESTED', approvalRequestId: 'APR-1',
+        createdAt: '2026-10-07T12:00:00Z', read: false,
+      }] }),
+      'POST /api/v1/notifications/7/read': jsonResponse(undefined, 204),
+    })
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'approver-runtime-only')
+
+    expect(wrapper.get('.notification-count').text()).toBe('1')
+    await wrapper.get('.notification-toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-notification="7"]').text()).toContain('새 승인 요청')
+
+    await wrapper.get('[data-notification="7"] .notification-read').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.notification-count').exists()).toBe(false)
+    expect(wrapper.find('[data-notification="7"]').exists()).toBe(false)
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/read'))).toHaveLength(1)
+  })
+
+  it('reads an item once even when its button is pressed twice and clears an earlier failure', async () => {
+    finboundApi.getUnreadNotificationCount.mockRestore()
+    let readCalls = 0
+    const fetchImpl = byPath({
+      'GET /api/v1/me': jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }),
+      'GET /api/v1/notifications/unread-count': jsonResponse({ unread: 1 }),
+      'GET /api/v1/notifications?unreadOnly=true': jsonResponse({ items: [{
+        notificationId: 8, kind: 'APPROVAL_APPROVED', approvalRequestId: 'APR-2',
+        createdAt: '2026-10-07T12:00:00Z', read: false,
+      }] }),
+      'POST /api/v1/notifications/8/read': () => (readCalls++ === 0
+        ? jsonResponse({ reasonCode: 'X' }, 500)
+        : jsonResponse(undefined, 204)),
+    })
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'operator-runtime-only')
+    await wrapper.get('.notification-toggle').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-notification="8"] .notification-read').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.notification-error').exists()).toBe(true)
+
+    const button = wrapper.get('[data-notification="8"] .notification-read')
+    await button.trigger('click')
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(readCalls).toBe(2)
+    expect(wrapper.find('.notification-error').exists()).toBe(false)
+    expect(wrapper.find('[data-notification="8"]').exists()).toBe(false)
+  })
+
+  it('does not show the inbox to a viewer', async () => {
+    const fetchImpl = byPath({
+      'GET /api/v1/me': jsonResponse({ role: 'VIEWER', employeeId: null }),
+    })
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'viewer-runtime-only')
+
+    expect(wrapper.find('.notification-toggle').exists()).toBe(false)
+    expect(finboundApi.getUnreadNotificationCount).not.toHaveBeenCalled()
+  })
+
+  it('drops an unread count that arrives after the session ended', async () => {
+    finboundApi.getUnreadNotificationCount.mockRestore()
+    let release
+    const late = new Promise((resolve) => { release = resolve })
+    const fetchImpl = byPath({
+      'GET /api/v1/me': jsonResponse({ role: 'OPERATOR', employeeId: 'EMP-101' }),
+      // 첫 세션의 요청만 늦게 답한다. 새 세션의 요청은 바로 0이다.
+      'GET /api/v1/notifications/unread-count': (() => {
+        let calls = 0
+        return () => (calls++ === 0 ? late : jsonResponse({ unread: 0 }))
+      })(),
+    })
+    configureFinboundApi({ mode: 'real', fetchImpl })
+    const wrapper = mount(App)
+    await startSession(wrapper, 'operator-runtime-only')
+
+    await wrapper.get('.session-end').trigger('click')
+    await startSession(wrapper, 'operator-runtime-only')
+    release(jsonResponse({ unread: 9 }))
+    await flushPromises()
+
+    expect(wrapper.find('.notification-count').exists()).toBe(false)
   })
 })

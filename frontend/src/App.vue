@@ -6,6 +6,7 @@ import brandWordmark from './assets/finbound-wordmark.png'
 import AgentRunView from './views/AgentRunView.vue'
 import ApprovalsView from './views/ApprovalsView.vue'
 import DashboardView from './views/DashboardView.vue'
+import NotificationBell from './components/NotificationBell.vue'
 import { finboundApi } from './services/finboundApi'
 
 const allScreens = [
@@ -22,6 +23,10 @@ const role = ref(null)
 const roleError = ref(false)
 // 세션마다 번호를 올린다. 로그아웃 뒤 늦게 도착한 역할 응답이 새 세션의 메뉴를 덮지 않게.
 let sessionGeneration = 0
+// 알림함에 넘기는 같은 값의 반응형 사본. 바뀌면 알림함이 이전 세션의 늦은 응답을 버린다.
+const sessionKey = ref(0)
+// 알림은 직원 신원이 있는 역할에만 있다. VIEWER에게는 보이지 않는다.
+const showNotifications = computed(() => sessionReady.value && ['OPERATOR', 'APPROVER'].includes(role.value))
 const screens = computed(() => allScreens.filter((screen) => (
   role.value === 'APPROVER' ? screen.id !== 'run' : screen.id !== 'approvals'
 )))
@@ -56,6 +61,7 @@ async function startSession() {
   if (!credential.value.trim()) return
   // 앞선 시작이 역할 응답을 기다리는 중이어도 이 시작이 이긴다.
   sessionGeneration += 1
+  sessionKey.value = sessionGeneration
   finboundApi.setCredential(credential.value.trim())
   credential.value = ''
   await loadRole()
@@ -64,6 +70,7 @@ async function startSession() {
 
 function endSession() {
   sessionGeneration += 1
+  sessionKey.value = sessionGeneration
   finboundApi.clearCredential()
   sessionReady.value = false
   role.value = null
@@ -103,6 +110,7 @@ function endSession() {
         <div><h1>{{ screenLabel(activeScreenConfig) }}</h1><p class="page-subtitle">{{ activeScreenConfig?.subtitle }}</p></div>
         <div class="runtime-actions">
           <div class="environment-badge"><span></span> {{ realMode ? 'Core API 연결 모드' : 'Mock 검증 모드' }}</div>
+          <NotificationBell v-if="showNotifications" :session-key="sessionKey" />
           <button v-if="realMode && sessionReady" class="session-end" type="button" @click="endSession">연결 종료</button>
         </div>
       </header>
