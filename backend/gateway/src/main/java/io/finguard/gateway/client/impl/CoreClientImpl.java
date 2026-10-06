@@ -22,6 +22,8 @@ import io.finguard.gateway.dto.AuditStart;
 import io.finguard.gateway.dto.BehaviorHistory;
 import io.finguard.gateway.dto.ResolvedContext;
 import io.finguard.gateway.dto.ToolCallRequest;
+import io.finguard.gateway.exception.AuditOutcomeConflictException;
+import io.finguard.gateway.exception.AuditOutcomeRejectedException;
 import io.finguard.gateway.exception.AuditWriteException;
 import io.finguard.gateway.exception.BehaviorHistoryUnavailableException;
 import io.finguard.gateway.exception.CoreUnavailableException;
@@ -108,6 +110,18 @@ public class CoreClientImpl implements CoreClient {
                 .body(outcome)
                 .retrieve()
                 .toBodilessEntity();
+        } catch (HttpClientErrorException e) {
+            // 409만 따로 본다. 같은 결과의 재전송은 Core가 200으로 받으므로 409는 다른 결과와의 충돌이다.
+            if (e.getStatusCode() == HttpStatus.CONFLICT) {
+                throw new AuditOutcomeConflictException("Core audit outcome conflicts with the recorded outcome", e);
+            }
+            // 400은 Core가 본문 형식·불변식 위반으로 확실히 거절한 것이다(docs/04 §11 검사 순서). 다시 보내도
+            // 같은 이유로 거절되므로 따로 센다. 401·403(자격 교체), 404, 408·429 등은 다시 보내면 될 수도 있어
+            // 단정하지 않고 전달 미확인으로 둔다 — 끝내 기록되지 않았는지는 Core의 조정 배치가 판단한다.
+            if (e.getStatusCode() == HttpStatus.BAD_REQUEST) {
+                throw new AuditOutcomeRejectedException("Core audit outcome rejected", e);
+            }
+            throw new AuditWriteException("Core audit outcome update failed", e);
         } catch (RestClientException e) {
             throw new AuditWriteException("Core audit outcome update failed", e);
         }
