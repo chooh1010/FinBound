@@ -1388,5 +1388,17 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
 - 스키마는 닫혀 있으므로 타입·필드 추가도 호환 변경이 아니다. 소비자를 먼저 배포하고 생산자를 배포한다. 의미가 바뀌면
   `schemaVersion`을 올린다.
 
+피드: `GET /feed/v1/events?after={feedSeq}&limit={1..500}` →
+`{"generation": "<uuid>", "events": [{"feedSeq": n, "eventJson": "<원문 문자열>", "eventHash": "<sha256 hex>"}], "nextAfter": n}`.
+
+- `eventJson`은 저장한 문자열 그대로다. 소비자는 그 UTF-8 바이트로 `eventHash`를 다시 계산해 확인한다.
+- 커밋된 뒤 시퀀서가 번호를 매긴 이벤트만 나간다. 늦게 커밋된 이벤트는 더 큰 번호를 받으므로 `after`로 이어 읽으면
+  건너뛰지 않는다. 번호에 빈칸은 생길 수 있다.
+- `generation`이 바뀌면 데이터베이스가 새로 만들어져 번호가 처음부터 다시 시작한 것이다. 소비자는 멈춘다.
+- `after`·`limit`가 범위 밖이면 `400 INVALID_FEED_CURSOR`다.
+- 인증은 **피드 전용 읽기 Credential**(`X-FinGuard-Service-Credential` 헤더, 설정 `finguard.events.feed.credential`)이다.
+  내부 Credential로는 피드를, 피드 Credential로는 `/internal/*`를 부를 수 없다(서로 다른 경로 패턴). 두 값이 같으면
+  Core가 기동하지 않고, 피드 Credential을 두지 않으면 피드는 열리지 않는다.
+
 소비자는 Core의 원천 표(감사·승인·아웃박스)를 직접 조회하지 않는다. 자기 상태(처리 기록·체크포인트)를 두는 저장소는
 가질 수 있다.

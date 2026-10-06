@@ -115,7 +115,7 @@ class ToolCallEventOutboxTest {
     }
 
     @Test
-    void aRepeatedOrConflictingOutcomeRecordsNothingMore() {
+    void repeatedOrConflictingOutcomeRecordsNothingMore() {
         insertProcessing("AUD-TWICE", "now() - interval '1 minute'");
         AuditOutcomeRequest outcome = allow();
         outcomes.updateOutcome("REQ-AUD-TWICE", outcome, AGENT);
@@ -143,7 +143,7 @@ class ToolCallEventOutboxTest {
     }
 
     @Test
-    void aFailedEventWriteRollsBackTheOutcomeAndTheUnknownMark() {
+    void failedEventWriteRollsBackTheOutcomeAndTheUnknownMark() {
         insertProcessing("AUD-POISON", "now() - interval '5 minutes'");
         poison("AUD-POISON");
 
@@ -181,7 +181,7 @@ class ToolCallEventOutboxTest {
     }
 
     @Test
-    void aFailureAfterTheEventWasWrittenRollsBackBothAndARetryRecordsExactlyOne() {
+    void failureAfterTheEventWasWrittenRollsBackBothAndARetryRecordsExactlyOne() {
         // 이벤트는 들어갔지만 같은 트랜잭션의 승인 요청 생성이 실패한다.
         insertProcessing("AUD-LATER", "now() - interval '1 minute'");
         poisonTable("approval_requests", "audit_event_id", "AUD-LATER");
@@ -198,7 +198,7 @@ class ToolCallEventOutboxTest {
     }
 
     @Test
-    void aFailedResolutionKeepsTheEarlierUnknownEvent() {
+    void failedResolutionKeepsTheEarlierUnknownEvent() {
         insertProcessing("AUD-KEEP", "now() - interval '5 minutes'");
         reconciler.reconcileOnce();
         poison("AUD-KEEP");

@@ -57,6 +57,15 @@ finguard:
     consume:
       # 묶인 승인을 Context Resolve에서 쓴다. Core → Gateway → policy-4를 올린 뒤에 켠다(docs/04 §7).
       enabled: ${APPROVAL_CONSUME_ENABLED:false}
+  events:
+    # 아웃박스 행에 피드 번호를 매긴다(docs/04 §18). 끄면 이벤트는 쌓이지만 소비자에게 나가지 않는다.
+    sequencer:
+      enabled: ${EVENTS_SEQUENCER_ENABLED:true}
+      interval: ${EVENTS_SEQUENCER_INTERVAL:200ms}
+      batch-size: ${EVENTS_SEQUENCER_BATCH_SIZE:500}
+    feed:
+      # 피드 전용 읽기 Credential. 비우면 피드를 열지 않는다. 내부 Credential과 같으면 기동하지 않는다.
+      credential: ${FINGUARD_EVENT_FEED_CREDENTIAL:}
 
 management:
   endpoints:

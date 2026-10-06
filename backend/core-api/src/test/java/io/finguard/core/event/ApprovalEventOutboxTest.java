@@ -182,7 +182,7 @@ class ApprovalEventOutboxTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"APPROVAL_REJECTED", "APPROVAL_EXPIRED", "APPROVAL_BOUND", "APPROVAL_CONSUMED"})
-    void aFailedEventWriteRollsBackEveryOtherTransition(String failingType) {
+    void failedEventWriteRollsBackEveryOtherTransition(String failingType) {
         String approvalId = openApproval("REQ-" + failingType);
         if (!failingType.equals("APPROVAL_REJECTED") && !failingType.equals("APPROVAL_EXPIRED")) {
             approvals.approve(approvalId, APPROVER, null);
@@ -216,7 +216,7 @@ class ApprovalEventOutboxTest {
     }
 
     @Test
-    void aSaveThatBypassesTheWriterIsRefused() {
+    void saveThatBypassesTheWriterIsRefused() {
         String approvalId = openApproval("REQ-BYPASS");
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
@@ -231,7 +231,7 @@ class ApprovalEventOutboxTest {
     }
 
     @Test
-    void aDetachedRequestIsRefusedInsteadOfRecordingAnEventAlone() {
+    void detachedRequestIsRefusedInsteadOfRecordingAnEventAlone() {
         String approvalId = openApproval("REQ-DETACHED");
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         // 이벤트 목록까지 읽어 둔 뒤 트랜잭션을 닫는다 — 분리된 엔티티다.
@@ -251,7 +251,7 @@ class ApprovalEventOutboxTest {
     }
 
     @Test
-    void aFailedEventWriteRollsBackTheDecision() {
+    void failedEventWriteRollsBackTheDecision() {
         String approvalId = openApproval("REQ-POISON");
         jdbc.execute("""
                 create function poisoned_event() returns trigger language plpgsql as $$
