@@ -719,6 +719,8 @@ GET /internal/v1/agents/{agentId}/behavior-history?window=5m
 
 BLOCK은 실행되지 않았으므로 `success`가 없다(`null`). 소비자는 이를 `false`로 바꾸지 않는다 — 바꾸면 정상 차단이
 실행 실패로 세진다(`errorRatio5m`, `docs/03-ai-spec.md` §8).
+Gateway는 `caseId`·`tool` 등 맥락이 빠진 행을 AI에 넘기지 않고 `behavior.history.events.dropped`로 센다.
+이 지표는 고유 행 수가 아니라 평가마다 버린 횟수다 — 같은 행이 다음 호출의 5분 창에 다시 들어오면 또 센다.
 
 Gateway와 FastAPI는 Behavior History를 위해 DB를 직접 조회하지 않는다.
 

@@ -22,6 +22,8 @@ import io.finguard.gateway.dto.ResolvedContext;
 import io.finguard.gateway.dto.ToolCallRequest;
 import io.finguard.gateway.exception.AiUnavailableException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Component
 @Profile("real-ai")
@@ -37,13 +39,18 @@ public class AiClientImpl implements AiClient {
     private final RestClient restClient;
     private final String baseUrl;
     private final String internalCredential;
+    private final Counter droppedHistoryEvents;
 
     public AiClientImpl(@Value("${finguard.ai.base-url}") String baseUrl,
                         @Value("${finguard.credentials.internal-service}") String internalCredential,
-                        @Value("${finguard.timeouts.ai-ms}") long timeoutMs) {
+                        @Value("${finguard.timeouts.ai-ms}") long timeoutMs,
+                        MeterRegistry meterRegistry) {
         this.restClient = RestClient.builder().requestFactory(requestFactory(timeoutMs)).build();
         this.baseUrl = baseUrl;
         this.internalCredential = internalCredential;
+        this.droppedHistoryEvents = Counter.builder("behavior.history.events.dropped")
+            .description("Behavior history events not sent to AI because Core returned them without context")
+            .register(meterRegistry);
     }
 
     @Override
@@ -89,11 +96,15 @@ public class AiClientImpl implements AiClient {
         }
     }
 
+    // 맥락이 빠진 사건은 AI 계약을 어기므로 보내지 않는다. 다만 조용히 버리면 이력이 통째로 비어도
+    // 드러나지 않는다 — caseId가 늘 비어 행동 모델이 이력을 한 번도 받지 못한 적이 있다. 버린 수를 센다.
     private List<Map<String, Object>> completedEvents(BehaviorHistory history) {
-        return history.completedEvents().stream()
+        List<Map<String, Object>> events = history.completedEvents().stream()
             .filter(this::isCompleteEvent)
             .map(this::completedEventBody)
             .toList();
+        droppedHistoryEvents.increment(history.completedEvents().size() - events.size());
+        return events;
     }
 
     private boolean isCompleteEvent(BehaviorHistory.CompletedEvent event) {
@@ -113,8 +124,10 @@ public class AiClientImpl implements AiClient {
         body.put("tool", event.tool());
         body.put("requestedAt", event.requestedAt());
         body.put("decision", event.decision());
-        body.put("success", Boolean.TRUE.equals(event.success()));
-        body.put("latencyMs", event.latencyMs() == null ? 0L : event.latencyMs());
+        // Core 값을 그대로 넘긴다. BLOCK은 실행되지 않아 success·latencyMs가 없다(null). false나 0으로 채우면
+        // 정상 차단이 실행 실패로 세진다(docs/04 §9, docs/03 §8 errorRatio5m).
+        body.put("success", event.success());
+        body.put("latencyMs", event.latencyMs());
         body.put("requestedData", event.requestedData());
         return body;
     }
