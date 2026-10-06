@@ -189,3 +189,59 @@ def test_behavior_endpoint_fails_closed_when_server_credential_is_missing(
 
     assert response.status_code == 503
     assert response.json()["detail"] == "BEHAVIOR_RISK_UNAVAILABLE"
+
+
+def _blocked_event(index: int, now: datetime) -> dict[str, object]:
+    event = _event(index, now)
+    event.update({"decision": "BLOCK", "success": None, "latencyMs": None})
+    return event
+
+
+def test_behavior_endpoint_accepts_blocks_without_execution_results() -> None:
+    now = datetime(2026, 8, 17, 5, 0, tzinfo=UTC)
+    failed = {**_event(1, now), "success": False, "latencyMs": None}
+    history = [_event(0, now), failed, _blocked_event(2, now)]
+
+    response = client.post(
+        "/internal/v1/risk/behavior", json=_request(history, now), headers=INTERNAL_HEADERS
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"decision": "BLOCK", "success": False, "latencyMs": None},
+        {"decision": "BLOCK", "success": None, "latencyMs": 0},
+        {"decision": "ALLOW", "success": None},
+        {"decision": "ALLOW", "success": "false"},
+        {"decision": "ALLOW", "success": 0},
+    ],
+)
+def test_behavior_endpoint_rejects_inconsistent_execution_results(
+    overrides: dict[str, object],
+) -> None:
+    # A BLOCK carrying a result, or an ALLOW without one, would be counted wrongly in errorRatio5m.
+    now = datetime(2026, 8, 17, 5, 0, tzinfo=UTC)
+    event = {**_event(0, now), **overrides}
+
+    response = client.post(
+        "/internal/v1/risk/behavior", json=_request([event], now), headers=INTERNAL_HEADERS
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("decision", ["ALLOW", "BLOCK"])
+def test_behavior_endpoint_requires_the_success_key(decision: str) -> None:
+    # Omitting success is not the same as "did not run": Core always sends the key, null for BLOCK.
+    now = datetime(2026, 8, 17, 5, 0, tzinfo=UTC)
+    event = {**_event(0, now), "decision": decision, "latencyMs": None}
+    del event["success"]
+
+    response = client.post(
+        "/internal/v1/risk/behavior", json=_request([event], now), headers=INTERNAL_HEADERS
+    )
+
+    assert response.status_code == 422

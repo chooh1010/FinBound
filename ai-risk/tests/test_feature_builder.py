@@ -28,8 +28,7 @@ def test_feature_builder_uses_only_completed_past_events() -> None:
             requestedData=["DEBT"],
             requestedAt=now + timedelta(seconds=1),
             decision="BLOCK",
-            success=False,
-            latencyMs=100,
+            success=None,
         ),
     ]
     current = CurrentToolCallAttempt(

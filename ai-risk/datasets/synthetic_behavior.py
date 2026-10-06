@@ -180,7 +180,10 @@ def _session_vectors(
         normal_error_probability = 0.04 if profile == "shifted" else 0.02
         normal_block_probability = 0.03 if profile == "shifted" else 0.02
         decision = Decision.BLOCK if rng.random() < normal_block_probability else Decision.ALLOW
-        success = decision is Decision.ALLOW and rng.random() >= normal_error_probability
+        allowed = decision is Decision.ALLOW
+        success = rng.random() >= normal_error_probability if allowed else None
+        # Draw latency even for BLOCK so the random stream (and the committed dataset) stays the same.
+        latency_ms = _latency_ms(rng, tool)
 
         history.append(
             CompletedBehaviorEvent(
@@ -192,7 +195,7 @@ def _session_vectors(
                 requestedAt=current_time,
                 decision=decision,
                 success=success,
-                latencyMs=_latency_ms(rng, tool),
+                latencyMs=latency_ms if allowed else None,
             )
         )
 
