@@ -21,6 +21,18 @@ class CredentialVerifierTest {
     }
 
     @Test
+    void identifiesWhichConfiguredCredentialWasUsedWithoutExposingIt() {
+        CredentialVerifier two = new CredentialVerifier(List.of("first-token", "second-token"));
+
+        VerifiedAgentIdentity first = two.verify("Bearer first-token").orElseThrow();
+        VerifiedAgentIdentity second = two.verify("Bearer second-token").orElseThrow();
+
+        assertThat(first.agentId()).isEqualTo(second.agentId());
+        assertThat(first.credentialId()).isNotEqualTo(second.credentialId());
+        assertThat(first.credentialId()).doesNotContain("first-token");
+    }
+
+    @Test
     void unknownTokenIsRejected() {
         assertThat(verifier.verify("Bearer other")).isEmpty();
     }

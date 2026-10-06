@@ -23,9 +23,10 @@ public class CredentialVerifier {
             return Optional.empty();
         }
         String token = authorizationHeader.substring(BEARER_PREFIX.length()).trim();
-        if (token.isEmpty() || !validTokens.contains(token)) {
+        int index = token.isEmpty() ? -1 : validTokens.indexOf(token);
+        if (index < 0) {
             return Optional.empty();
         }
-        return Optional.of(VerifiedAgentIdentity.verified(LOAN_AGENT_ID));
+        return Optional.of(VerifiedAgentIdentity.verified(LOAN_AGENT_ID, "agent-credential-" + index));
     }
 }
