@@ -49,6 +49,10 @@ public class ApprovalRequestEvent {
     @Column(name = "actor_id", length = 64)
     private String actorId;
 
+    /** 승인·거절 때 승인자가 남긴 말. 원문 Prompt나 금융 값을 담지 않는다(docs/06 §24). */
+    @Column(name = "note", length = 500)
+    private String note;
+
     protected ApprovalRequestEvent() {
     }
 
@@ -58,12 +62,38 @@ public class ApprovalRequestEvent {
             ApprovalEventType eventType,
             Instant occurredAt,
             ApprovalActorType actorType,
-            String actorId) {
+            String actorId,
+            String note) {
         this.approvalRequest = approvalRequest;
         this.sequence = sequence;
         this.eventType = eventType;
         this.occurredAt = occurredAt;
         this.actorType = actorType;
         this.actorId = actorId;
+        this.note = note;
+    }
+
+    public int getSequence() {
+        return sequence;
+    }
+
+    public ApprovalEventType getEventType() {
+        return eventType;
+    }
+
+    public Instant getOccurredAt() {
+        return occurredAt;
+    }
+
+    public ApprovalActorType getActorType() {
+        return actorType;
+    }
+
+    public String getActorId() {
+        return actorId;
+    }
+
+    public String getNote() {
+        return note;
     }
 }

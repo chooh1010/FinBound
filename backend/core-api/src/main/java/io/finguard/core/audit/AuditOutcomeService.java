@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.dao.DataAccessException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -13,12 +14,18 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import io.finguard.core.approval.ApprovalProperties;
 import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditCompletion;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.PolicyDecision;
+import io.finguard.core.domain.SecuredAgentInput;
+import io.finguard.core.domain.TaskPassport;
+import io.finguard.core.domain.TaskType;
 import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
+import io.finguard.core.repository.SecuredAgentInputRepository;
+import io.finguard.core.repository.TaskPassportRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 
@@ -41,6 +48,7 @@ import io.micrometer.core.instrument.MeterRegistry;
  * 해소된다. 지고 끝내면 실제 결과가 하나 더 사라진다.
  */
 @Service
+@EnableConfigurationProperties(ApprovalProperties.class)
 public class AuditOutcomeService {
 
     private static final Logger log = LoggerFactory.getLogger(AuditOutcomeService.class);
@@ -50,6 +58,9 @@ public class AuditOutcomeService {
 
     private final AuditEventRepository auditEvents;
     private final ApprovalRequestRepository approvalRequests;
+    private final TaskPassportRepository passports;
+    private final SecuredAgentInputRepository securedInputs;
+    private final ApprovalProperties approvalProperties;
     private final TransactionTemplate transaction;
     private final Clock clock;
     private final Counter resolvedCounter;
@@ -58,11 +69,17 @@ public class AuditOutcomeService {
     public AuditOutcomeService(
             AuditEventRepository auditEvents,
             ApprovalRequestRepository approvalRequests,
+            TaskPassportRepository passports,
+            SecuredAgentInputRepository securedInputs,
+            ApprovalProperties approvalProperties,
             PlatformTransactionManager transactionManager,
             Clock clock,
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
         this.approvalRequests = approvalRequests;
+        this.passports = passports;
+        this.securedInputs = securedInputs;
+        this.approvalProperties = approvalProperties;
         this.transaction = new TransactionTemplate(transactionManager);
         // 시도마다 독립된 새 트랜잭션이다. 바깥 트랜잭션에 합류하면 재시도가 이미 rollback-only가 된
         // 같은 트랜잭션을 다시 쓰고, 커밋 전에 "커밋 뒤" 지표·경보가 나간다.
@@ -127,7 +144,16 @@ public class AuditOutcomeService {
     /** 처음 확정된 APPROVAL 행이면 같은 트랜잭션에서 승인 요청을 연다. 롤백되면 감사 결과와 함께 사라진다. */
     private AuditEvent openApprovalIfRequired(AuditEvent event) {
         if (event.getDecision() == PolicyDecision.APPROVAL) {
-            approvalRequests.saveAndFlush(ApprovalRequest.open(event, clock.instant()));
+            // 다시 실행이 같은 요청인지 확인할 값을 지금 함께 남긴다. 나중에 감사 행을 다시 해석하지 않게.
+            TaskType taskType = event.getPassportId() == null
+                    ? null
+                    : passports.findById(event.getPassportId()).map(TaskPassport::getTaskType).orElse(null);
+            String inputHash = securedInputs.findFirstByAgentRunId(event.getAgentRunId())
+                    .map(SecuredAgentInput::getInputHash)
+                    .orElse(null);
+            // 생성 시각과 기한도 DB 시계로 잡는다. 판정이 DB 시계를 쓰므로 둘이 어긋나면 기한이 늘거나 줄어든다.
+            approvalRequests.saveAndFlush(ApprovalRequest.open(
+                    event, taskType, inputHash, approvalRequests.databaseNow(), approvalProperties.pendingTtl()));
         }
         return event;
     }

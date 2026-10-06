@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import io.finguard.core.approval.ApprovalProperties;
 import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
@@ -29,6 +31,8 @@ import io.finguard.core.domain.Severity;
 import io.finguard.core.domain.Tool;
 import io.finguard.core.repository.ApprovalRequestRepository;
 import io.finguard.core.repository.AuditEventRepository;
+import io.finguard.core.repository.SecuredAgentInputRepository;
+import io.finguard.core.repository.TaskPassportRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
@@ -48,6 +52,9 @@ class AuditOutcomeServiceRetryTest {
             new AuditOutcomeService(
                     repository,
                     approvalRequests,
+                    mock(TaskPassportRepository.class),
+                    mock(SecuredAgentInputRepository.class),
+                    new ApprovalProperties(Duration.ofMinutes(30), Duration.ofMinutes(15)),
                     mock(PlatformTransactionManager.class),
                     Clock.fixed(NOW, ZoneOffset.UTC),
                     new SimpleMeterRegistry());
@@ -87,6 +94,7 @@ class AuditOutcomeServiceRetryTest {
 
     @Test
     void anApprovalThatWinsOnRetryOpensExactlyOneRequest() {
+        when(approvalRequests.databaseNow()).thenReturn(NOW);
         // 진 시도는 감사 저장(saveAndFlush)에서 실패하므로 승인 요청까지 가지 않는다. 이긴 시도만 하나를 연다.
         AuditEvent unknownNow = event();
         unknownNow.markOutcomeUnknown(NOW.minusSeconds(5));
