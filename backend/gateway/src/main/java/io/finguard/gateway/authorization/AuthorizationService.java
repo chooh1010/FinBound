@@ -55,7 +55,8 @@ public class AuthorizationService {
                 requestId,
                 resolvedContext.scopeStatus(),
                 riskInput(promptRisk, behavior),
-                new HardLimits(hardLimitService.isExceeded(identity.agentId())));
+                new HardLimits(hardLimitService.isExceeded(identity.agentId())),
+                new AuthorizationContext.ApprovalInput(resolvedContext.approvalGranted()));
             PolicyDecisionResult decision = opaClient.decide(context);
             return new AuthorizationOutcome(decision, behavior.behaviorRisk(), PolicyInputSnapshot.from(context));
         } catch (CoreUnavailableException e) {

@@ -951,7 +951,9 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
   오면 같은 결과(200, 저장값 그대로)로 본다 — 새 필드가 생겼다는 이유로 재전송이 충돌이 되지 않게. 반대로 판정 입력이
   저장된 행에 다른 값이나 판정 입력 없는 결과가 오면 `409`다 — 저장된 근거를 조용히 지우거나 바꾸지 않는다.
 - `behaviorAnomalyDetected`는 현재 정책이 읽지 않는다. 기록만 한다.
-- `approvalGranted`(선택, `loan-review-policy-4`부터)는 생략과 `false`를 같은 값으로 본다. 그래서 생략한 결과와
+- `approvalGranted`(선택, `loan-review-policy-4`부터)는 생략과 `false`를 같은 값으로 본다. Core는 이 값을 따로 저장하지 않는다 — resolve 때
+  이 행에 적은 `approvalRequestId`가 있으면 참이다. 보낸 값이 그와 다르면 정책이 본 입력과 기록이 어긋나므로 결과를
+  `400`으로 거부한다. 그래서 생략한 결과와
   `false`인 결과는 같은 결과(200)다. 한쪽만 `true`면 다른 결과(`409`)다 — 승인 사용 여부는 바꿀 수 없는 근거다.
 
 `systemOutcome`은 `COMPLETED | ERROR`만 받는다. `PROCESSING`과 `OUTCOME_UNKNOWN`은 `400`으로

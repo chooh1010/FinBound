@@ -228,7 +228,7 @@ class ToolCallEnforcementServiceTest {
 
     @Test
     void approvalDoesNotRunTheToolAndAnswers202() {
-        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("CRITICAL", true, false);
+        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("CRITICAL", true, false, false);
         when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
             new AuthorizationOutcome(
                 new PolicyDecisionResult(PolicyDecision.APPROVAL, "HIGH", true,
@@ -294,7 +294,7 @@ class ToolCallEnforcementServiceTest {
     /** 판정에 닿은 결과는 판정 입력 스냅샷을 Core로 넘긴다 — ALLOW 완료와 downstream 오류 모두. */
     @Test
     void decidedOutcomesForwardThePolicyInputSnapshot() {
-        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("ALERT", false, false);
+        PolicyInputSnapshot snapshot = new PolicyInputSnapshot("ALERT", false, false, false);
         when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
             new AuthorizationOutcome(
                 new PolicyDecisionResult(PolicyDecision.ALLOW, "MEDIUM", false, List.of(), "policy-1"),

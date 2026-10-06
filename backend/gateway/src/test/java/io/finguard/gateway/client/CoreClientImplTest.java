@@ -104,6 +104,38 @@ class CoreClientImplTest {
         assertThat(context.scopeStatus().customerScope()).isEqualTo("OK");
         assertThat(context.promptRiskSnapshot().riskLevel()).isEqualTo("LOW");
         assertThat(context.promptRiskSnapshot().detected()).isFalse();
+        // 승인 필드가 없는 Core 응답은 승인을 쓰지 않은 것이다.
+        assertThat(context.approvalGranted()).isFalse();
+    }
+
+    @Test
+    void resolveContextReadsTheApprovalCoreUsed() {
+        server.stubFor(post(urlEqualTo("/internal/v1/context/resolve"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {
+                      "requestId": "550e8400-e29b-41d4-a716-446655440000",
+                      "references": {"employeeId": "EMP-101", "caseId": "LOAN-2026-001", "passportId": "PASS-001"},
+                      "scopeStatus": {
+                        "employeeAuthority": "OK", "permissionTemplate": "OK", "caseStatus": "OK", "mandate": "OK",
+                        "passportStatus": "OK", "agentBinding": "OK", "customerScope": "OK", "toolScope": "OK",
+                        "dataScope": "OK"
+                      },
+                      "promptRiskSnapshot": {
+                        "evaluationStatus": "EVALUATED", "promptRisk": 0.05, "riskLevel": "LOW", "detected": false,
+                        "inputHash": "sha256:x", "modelVersion": "prompt-guard-1"
+                      },
+                      "approval": {"approvalRequestId": "APR-1", "granted": true}
+                    }
+                    """)));
+
+        ResolvedContext context = client.resolveContext(
+            identity, request, "550e8400-e29b-41d4-a716-446655440000", "trace");
+
+        assertThat(context.approvalGranted()).isTrue();
+        assertThat(context.approval().approvalRequestId()).isEqualTo("APR-1");
     }
 
     @Test
@@ -194,7 +226,7 @@ class CoreClientImplTest {
             true,
             "policy-1",
             Instant.now(),
-            new io.finguard.gateway.dto.PolicyInputSnapshot("ALERT", true, false));
+            new io.finguard.gateway.dto.PolicyInputSnapshot("ALERT", true, false, true));
 
         client.updateAuditOutcome(identity, "REQ-1", outcome, "trace");
 
@@ -205,7 +237,8 @@ class CoreClientImplTest {
             .withRequestBody(matchingJsonPath("$.riskFlagged", equalTo("true")))
             .withRequestBody(matchingJsonPath("$.policyInput.behaviorRiskLevel", equalTo("ALERT")))
             .withRequestBody(matchingJsonPath("$.policyInput.behaviorAnomalyDetected", equalTo("true")))
-            .withRequestBody(matchingJsonPath("$.policyInput.hardRequestLimitExceeded", equalTo("false"))));
+            .withRequestBody(matchingJsonPath("$.policyInput.hardRequestLimitExceeded", equalTo("false")))
+            .withRequestBody(matchingJsonPath("$.policyInput.approvalGranted", equalTo("true"))));
     }
 
     @Test

@@ -41,6 +41,11 @@ public class ApprovalConsumption {
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<String> consume(
             AuditEvent auditEvent, String targetConsumerId, Tool requestedTool, Set<DataType> requestedData) {
+        // 같은 호출의 재시도다(근거가 같아야 여기까지 온다). 이미 쓴 승인은 스위치와 관계없이 그대로 알린다 — 스위치를
+        // 끈 인스턴스가 재시도를 받아 false로 답하면, 감사 행에는 승인이 있는데 판정은 승인 없이 내려진다.
+        if (auditEvent.getApprovalRequestId() != null) {
+            return Optional.of(auditEvent.getApprovalRequestId());
+        }
         if (!properties.enabled()) {
             return Optional.empty();
         }

@@ -367,7 +367,11 @@ public class AuditEvent {
     public PolicyInput getPolicyInput() {
         return behaviorRiskLevel == null
                 ? null
-                : new PolicyInput(behaviorRiskLevel, behaviorAnomalyDetected, hardRequestLimitExceeded);
+                : new PolicyInput(
+                        behaviorRiskLevel,
+                        behaviorAnomalyDetected,
+                        hardRequestLimitExceeded,
+                        approvalRequestId != null);
     }
 
     public BigDecimal getBehaviorRisk() {
@@ -532,6 +536,11 @@ public class AuditEvent {
         this.errorLocation = completion.errorLocation();
         this.behaviorRisk = completion.behaviorRisk();
         PolicyInput policyInput = completion.policyInput();
+        // 판정이 승인을 썼다는 주장은 Core가 resolve 때 승인을 이 행에 적은 사실과 같아야 한다. 다르면 정책이 본 입력과
+        // 감사 기록이 어긋난다 — 기록하지 않고 거부한다.
+        if (policyInput != null && policyInput.approvalGranted() != (approvalRequestId != null)) {
+            throw new IllegalArgumentException("policyInput.approvalGranted disagrees with the approval used");
+        }
         this.behaviorRiskLevel = policyInput == null ? null : policyInput.behaviorRiskLevel();
         this.behaviorAnomalyDetected = policyInput == null ? null : policyInput.behaviorAnomalyDetected();
         this.hardRequestLimitExceeded = policyInput == null ? null : policyInput.hardRequestLimitExceeded();
