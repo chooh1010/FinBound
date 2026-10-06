@@ -23,7 +23,10 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import jakarta.persistence.Version;
 
 /**
@@ -120,6 +123,11 @@ public class ApprovalRequest {
     @Column(name = "version", nullable = false)
     private Long version;
 
+    // 이번 트랜잭션에서 새로 붙었고 아직 이벤트 v2로 내보내지 않은 이벤트. 저장하지 않는다 — ApprovalEventWriter가
+    // 저장과 함께 아웃박스에 남긴 뒤 비운다(docs/04 §18).
+    @Transient
+    private final List<ApprovalRequestEvent> unpublishedEvents = new ArrayList<>();
+
     protected ApprovalRequest() {
     }
 
@@ -148,8 +156,7 @@ public class ApprovalRequest {
         request.requestedDataKey = dataKey(event.getRequestedData());
         // 기한은 승인 요청이 생긴 때부터 잰다. 결과가 늦게 도착해 늦게 열린 요청도 같은 시간을 받는다.
         request.expiresAt = requestedAt.plus(pendingTtl);
-        request.events.add(new ApprovalRequestEvent(
-                request, 1, ApprovalEventType.REQUESTED, requestedAt, ApprovalActorType.SYSTEM, null, null));
+        request.append(ApprovalEventType.REQUESTED, requestedAt, ApprovalActorType.SYSTEM, null, null);
         return request;
     }
 
@@ -271,7 +278,34 @@ public class ApprovalRequest {
             ApprovalActorType actor,
             String actorId,
             ApprovalDecisionReason reason) {
-        events.add(new ApprovalRequestEvent(this, events.size() + 1, type, at, actor, actorId, reason));
+        ApprovalRequestEvent event =
+                new ApprovalRequestEvent(this, events.size() + 1, type, at, actor, actorId, reason);
+        events.add(event);
+        unpublishedEvents.add(event);
+    }
+
+    /**
+     * 저장 직전 검사. 내보내지 않은 이벤트가 남아 있으면 ApprovalEventWriter를 거치지 않은 저장이다 — 그대로 두면 상태는
+     * 바뀌는데 이벤트 v2가 빠진다. 모든 전이는 상태 컬럼을 바꾸므로 이 검사가 매번 걸린다.
+     */
+    @PrePersist
+    @PreUpdate
+    void requirePublishedEvents() {
+        if (!unpublishedEvents.isEmpty()) {
+            throw new IllegalStateException("Approval events must be saved through ApprovalEventWriter");
+        }
+    }
+
+    /** 아직 저장되지 않은 새 요청인가. 새 요청은 persist, 관리 중인 요청은 flush로 저장한다. */
+    public boolean isNew() {
+        return version == null;
+    }
+
+    /** 내보낼 이벤트를 넘기고 비운다. 같은 이벤트를 두 번 내보내지 않는다. */
+    public List<ApprovalRequestEvent> takeUnpublishedEvents() {
+        List<ApprovalRequestEvent> taken = List.copyOf(unpublishedEvents);
+        unpublishedEvents.clear();
+        return taken;
     }
 
     static String dataKey(Set<DataType> requestedData) {
@@ -332,6 +366,14 @@ public class ApprovalRequest {
 
     public Instant getValidUntil() {
         return validUntil;
+    }
+
+    public String getAgentId() {
+        return agentId;
+    }
+
+    public String getConsumedByAuditEventId() {
+        return consumedByAuditEventId;
     }
 
     public String getBoundAgentRunId() {

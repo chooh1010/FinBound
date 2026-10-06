@@ -28,6 +28,7 @@ public class ApprovalExpiry {
     private static final Logger log = LoggerFactory.getLogger(ApprovalExpiry.class);
 
     private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalEventWriter approvalEvents;
     private final TransactionTemplate rowTransaction;
     private final ApprovalExpiryProperties properties;
     private final Counter expiredCounter;
@@ -35,10 +36,12 @@ public class ApprovalExpiry {
 
     public ApprovalExpiry(
             ApprovalRequestRepository approvalRequests,
+            ApprovalEventWriter approvalEvents,
             PlatformTransactionManager transactionManager,
             ApprovalExpiryProperties properties,
             MeterRegistry meterRegistry) {
         this.approvalRequests = approvalRequests;
+        this.approvalEvents = approvalEvents;
         this.rowTransaction = new TransactionTemplate(transactionManager);
         this.rowTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.properties = properties;
@@ -71,8 +74,8 @@ public class ApprovalExpiry {
                 if (request == null || !request.expireIfDue(approvalRequests.databaseNow())) {
                     return false;
                 }
-                // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 flush한다(새 이벤트가 persist로 들어간다).
-                approvalRequests.flush();
+                        // 저장과 이번 전이의 이벤트 v2 기록을 한 곳에서 한다(ApprovalEventWriter).
+                approvalEvents.save(request);
                 return true;
             });
         } catch (RuntimeException exception) {

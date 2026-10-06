@@ -14,6 +14,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import io.finguard.core.approval.ApprovalEventWriter;
 import io.finguard.core.approval.ApprovalProperties;
 import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.AuditCompletion;
@@ -60,6 +61,7 @@ public class AuditOutcomeService {
 
     private final AuditEventRepository auditEvents;
     private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalEventWriter approvalEvents;
     private final TaskPassportRepository passports;
     private final SecuredAgentInputRepository securedInputs;
     private final ApprovalProperties approvalProperties;
@@ -72,6 +74,7 @@ public class AuditOutcomeService {
     public AuditOutcomeService(
             AuditEventRepository auditEvents,
             ApprovalRequestRepository approvalRequests,
+            ApprovalEventWriter approvalEvents,
             TaskPassportRepository passports,
             SecuredAgentInputRepository securedInputs,
             ApprovalProperties approvalProperties,
@@ -81,6 +84,7 @@ public class AuditOutcomeService {
             MeterRegistry meterRegistry) {
         this.auditEvents = auditEvents;
         this.approvalRequests = approvalRequests;
+        this.approvalEvents = approvalEvents;
         this.passports = passports;
         this.securedInputs = securedInputs;
         this.approvalProperties = approvalProperties;
@@ -163,7 +167,7 @@ public class AuditOutcomeService {
                     .map(SecuredAgentInput::getInputHash)
                     .orElse(null);
             // 생성 시각과 기한도 DB 시계로 잡는다. 판정이 DB 시계를 쓰므로 둘이 어긋나면 기한이 늘거나 줄어든다.
-            approvalRequests.saveAndFlush(ApprovalRequest.open(
+            approvalEvents.save(ApprovalRequest.open(
                     event, taskType, inputHash, approvalRequests.databaseNow(), approvalProperties.pendingTtl()));
         }
         return event;

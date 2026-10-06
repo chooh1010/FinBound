@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -29,10 +27,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.networknt.schema.InputFormat;
-import com.networknt.schema.Schema;
-import com.networknt.schema.SchemaRegistry;
-import com.networknt.schema.SpecificationVersion;
 
 import io.finguard.core.audit.AuditOutcomeRequest;
 import io.finguard.core.audit.AuditOutcomeService;
@@ -110,7 +104,7 @@ class ToolCallEventOutboxTest {
         assertThat(row.get("source_key")).isEqualTo("AUDIT:AUD-ALLOW:FINALIZED");
         String eventJson = (String) row.get("event_json");
         assertThat(row.get("event_hash")).isEqualTo(EventRecorder.sha256(eventJson));
-        assertSatisfiesContract(eventJson);
+        EventContract.assertSatisfiesContract(eventJson);
         JsonNode event = JSON.readTree(eventJson);
         assertThat(event.get("eventId").asText()).isEqualTo(row.get("event_id").toString());
         JsonNode payload = event.get("payload");
@@ -144,7 +138,7 @@ class ToolCallEventOutboxTest {
         // 해소는 RESOLVED 하나다. FINALIZED를 함께 내면 소비자가 같은 결과를 두 번 센다.
         assertThat(types).containsExactly("TOOL_CALL_OUTCOME_UNKNOWN", "TOOL_CALL_OUTCOME_RESOLVED");
         for (String eventJson : jdbc.queryForList("select event_json from event_outbox", String.class)) {
-            assertSatisfiesContract(eventJson);
+            EventContract.assertSatisfiesContract(eventJson);
         }
     }
 
@@ -178,7 +172,7 @@ class ToolCallEventOutboxTest {
         outcomes.updateOutcome("REQ-AUD-NO-TOOL", allow(), AGENT);
 
         for (String eventJson : jdbc.queryForList("select event_json from event_outbox", String.class)) {
-            assertSatisfiesContract(eventJson);
+            EventContract.assertSatisfiesContract(eventJson);
         }
         assertThat(payloadOf("AUD-BLOCK").has("policyVersion")).isFalse();
         assertThat(payloadOf("AUD-ERROR").has("decision")).isFalse();
@@ -198,7 +192,9 @@ class ToolCallEventOutboxTest {
         jdbc.execute("drop trigger poisoned_event on approval_requests");
         outcomes.updateOutcome("REQ-AUD-LATER", outcome, AGENT);
 
-        assertThat(count()).isEqualTo(1);
+        // 확정 하나와 승인 요청 하나 — 실패한 시도의 이벤트는 남지 않았다.
+        assertThat(jdbc.queryForList("select event_type from event_outbox order by id", String.class))
+                .containsExactly("TOOL_CALL_FINALIZED", "APPROVAL_REQUESTED");
     }
 
     @Test
@@ -280,18 +276,6 @@ class ToolCallEventOutboxTest {
 
     private long count() {
         return jdbc.queryForObject("select count(*) from event_outbox", Long.class);
-    }
-
-    private static void assertSatisfiesContract(String eventJson) throws IOException {
-        Path schemaFile = Path.of(System.getProperty("finguard.repository.root"),
-                "contracts", "events", "finguard-event-v2.schema.json");
-        Schema schema = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12)
-                .getSchema(Files.readString(schemaFile));
-        schema.initializeValidators();
-        assertThat(schema.validate(eventJson, InputFormat.JSON,
-                        context -> context.executionConfig(config -> config.formatAssertionsEnabled(true))))
-                .as(eventJson)
-                .isEmpty();
     }
 
     private void insertProcessing(String auditEventId, String receivedAtSql) {

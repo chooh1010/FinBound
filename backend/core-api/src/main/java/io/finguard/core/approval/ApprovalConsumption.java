@@ -30,10 +30,15 @@ public class ApprovalConsumption {
     private static final Logger log = LoggerFactory.getLogger(ApprovalConsumption.class);
 
     private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalEventWriter approvalEvents;
     private final ApprovalConsumeProperties properties;
 
-    public ApprovalConsumption(ApprovalRequestRepository approvalRequests, ApprovalConsumeProperties properties) {
+    public ApprovalConsumption(
+            ApprovalRequestRepository approvalRequests,
+            ApprovalEventWriter approvalEvents,
+            ApprovalConsumeProperties properties) {
         this.approvalRequests = approvalRequests;
+        this.approvalEvents = approvalEvents;
         this.properties = properties;
     }
 
@@ -71,8 +76,8 @@ public class ApprovalConsumption {
             return Optional.empty();
         }
         auditEvent.linkApproval(request.getApprovalRequestId());
-        // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 flush한다(새 이벤트가 persist로 들어간다).
-        approvalRequests.flush();
+        // 저장과 이번 전이의 이벤트 v2 기록을 한 곳에서 한다(ApprovalEventWriter).
+        approvalEvents.save(request);
         return Optional.of(request.getApprovalRequestId());
     }
 }

@@ -18,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import io.finguard.core.domain.ApprovalRequest;
+import io.finguard.core.domain.ApprovalRequestEvent;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
 
@@ -56,11 +58,33 @@ public class EventRecorder {
                 "AUDIT:" + event.getAuditEventId() + ":" + type.auditTransition(), toolCallPayload(type, event));
     }
 
+    /**
+     * 승인 이벤트 한 건을 기록한다. 승인 이벤트 표의 행과 1:1이다(원천 키 = 요청 id + 순번). 시각은 그 이벤트의 시각 —
+     * 승인 전이는 잠금 뒤 DB 시각을 이미 쓴다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordApproval(ApprovalRequest request, ApprovalRequestEvent event) {
+        EventType type = EventType.valueOf("APPROVAL_" + event.getEventType().name());
+        record(type, request.getApprovalRequestId(), request.getApprovalRequestId(),
+                "APPROVAL:" + request.getApprovalRequestId() + ":" + event.getSequence(),
+                approvalPayload(request, event), event.getOccurredAt());
+    }
+
     private void record(
             EventType type, String aggregateId, String partitionKey, String sourceKey, Map<String, Object> payload) {
-        UUID eventId = UUID.randomUUID();
         // 전이의 DB 시각. 승인 전이가 DB 시계를 쓰고, 경보 버킷이 이 값을 쓴다 — 시계는 하나다.
-        Instant occurredAt = jdbc.queryForObject("select clock_timestamp()", Timestamp.class).toInstant();
+        record(type, aggregateId, partitionKey, sourceKey, payload,
+                jdbc.queryForObject("select clock_timestamp()", Timestamp.class).toInstant());
+    }
+
+    private void record(
+            EventType type,
+            String aggregateId,
+            String partitionKey,
+            String sourceKey,
+            Map<String, Object> payload,
+            Instant occurredAt) {
+        UUID eventId = UUID.randomUUID();
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("eventId", eventId.toString());
         envelope.put("schemaVersion", SCHEMA_VERSION);
@@ -112,6 +136,31 @@ public class EventRecorder {
     }
 
     /** 빈 문자열도 값이 없는 것으로 본다. Core는 빈 정책 버전을 받지만 계약은 1자 이상만 허용한다. */
+    /** 스키마의 승인 payload. 타입별 필드는 그 전이가 만든 값이다. */
+    private static Map<String, Object> approvalPayload(ApprovalRequest request, ApprovalRequestEvent event) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("approvalRequestId", request.getApprovalRequestId());
+        payload.put("sequence", event.getSequence());
+        payload.put("auditEventId", request.getAuditEventId());
+        payload.put("agentId", request.getAgentId());
+        payload.put("agentRunId", request.getAgentRunId());
+        // V11 이전에 열린 요청은 요청 직원이 비어 있을 수 있다. 그때는 직원 알림이 없다.
+        putIfPresent(payload, "requesterEmployeeId", request.getEmployeeId());
+        payload.put("actorType", event.getActorType().name());
+        putIfPresent(payload, "actorId", event.getActorId());
+        putIfPresent(payload, "reason", event.getReason() == null ? null : event.getReason().name());
+        switch (event.getEventType()) {
+            case REQUESTED -> payload.put("expiresAt", request.getExpiresAt().toString());
+            case APPROVED -> payload.put("validUntil", request.getValidUntil().toString());
+            case BOUND -> payload.put("boundAgentRunId", request.getBoundAgentRunId());
+            case CONSUMED -> payload.put("consumedByAuditEventId", request.getConsumedByAuditEventId());
+            case REJECTED, EXPIRED -> {
+                // 결정·만료 자체가 사실이다. 더할 값이 없다.
+            }
+        }
+        return payload;
+    }
+
     private static void putIfPresent(Map<String, Object> payload, String key, Object value) {
         if (value == null || (value instanceof String text && text.isBlank())) {
             return;
