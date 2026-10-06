@@ -1,0 +1,707 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finguard.io/contracts/events/finguard-event-v2.schema.json",
+  "title": "FinGuardEventV2",
+  "description": "Core가 감사 결과 확정과 승인 전이를 같은 트랜잭션에서 아웃박스에 남기는 이벤트(docs/04 §18). 소비자는 내부 이벤트 피드로 받는다. 원본 Prompt, 금융 응답, 자격 증명, 고객 식별자를 싣지 않는다. 닫힌 스키마라 타입·필드 추가도 호환이 아니다 — 소비자를 먼저 배포한다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "schemaVersion",
+    "eventType",
+    "occurredAt",
+    "aggregateType",
+    "aggregateId",
+    "partitionKey",
+    "payload"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "TOOL_CALL_FINALIZED",
+        "TOOL_CALL_OUTCOME_UNKNOWN",
+        "TOOL_CALL_OUTCOME_RESOLVED",
+        "APPROVAL_REQUESTED",
+        "APPROVAL_APPROVED",
+        "APPROVAL_REJECTED",
+        "APPROVAL_EXPIRED",
+        "APPROVAL_BOUND",
+        "APPROVAL_CONSUMED"
+      ]
+    },
+    "occurredAt": {
+      "$comment": "The DB time of the transition (clock_timestamp in the same transaction). Alert buckets use it, so there is one clock.",
+      "$ref": "#/$defs/timestamp"
+    },
+    "aggregateType": {
+      "type": "string",
+      "enum": [
+        "TOOL_CALL",
+        "APPROVAL"
+      ]
+    },
+    "aggregateId": {
+      "$comment": "auditEventId for TOOL_CALL, approvalRequestId for APPROVAL. Equal to the same field in payload (checked by Core tests, not expressible here).",
+      "$ref": "#/$defs/nonEmptyIdentifier"
+    },
+    "partitionKey": {
+      "$comment": "agentId for TOOL_CALL, approvalRequestId for APPROVAL. Becomes the message key when the transport changes to Kafka.",
+      "$ref": "#/$defs/nonEmptyIdentifier"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "enum": [
+              "TOOL_CALL_FINALIZED",
+              "TOOL_CALL_OUTCOME_UNKNOWN",
+              "TOOL_CALL_OUTCOME_RESOLVED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "aggregateType": {
+            "const": "TOOL_CALL"
+          },
+          "payload": {
+            "$ref": "#/$defs/toolCallPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "enum": [
+              "APPROVAL_REQUESTED",
+              "APPROVAL_APPROVED",
+              "APPROVAL_REJECTED",
+              "APPROVAL_EXPIRED",
+              "APPROVAL_BOUND",
+              "APPROVAL_CONSUMED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "aggregateType": {
+            "const": "APPROVAL"
+          },
+          "payload": {
+            "$ref": "#/$defs/approvalPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "enum": [
+              "TOOL_CALL_FINALIZED",
+              "TOOL_CALL_OUTCOME_RESOLVED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "systemOutcome",
+              "reasonCodes",
+              "completedAt"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "TOOL_CALL_FINALIZED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "detectedAt"
+                  ]
+                },
+                {
+                  "required": [
+                    "resolvedAt"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "TOOL_CALL_OUTCOME_RESOLVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "detectedAt",
+              "resolvedAt"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "$comment": "The outcome never arrived: identifiers and the detection time only, nothing invented. An approval used at resolve may still be linked.",
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "TOOL_CALL_OUTCOME_UNKNOWN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "detectedAt"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "decision"
+                  ]
+                },
+                {
+                  "required": [
+                    "systemOutcome"
+                  ]
+                },
+                {
+                  "required": [
+                    "reasonCodes"
+                  ]
+                },
+                {
+                  "required": [
+                    "severity"
+                  ]
+                },
+                {
+                  "required": [
+                    "riskFlagged"
+                  ]
+                },
+                {
+                  "required": [
+                    "policyVersion"
+                  ]
+                },
+                {
+                  "required": [
+                    "completedAt"
+                  ]
+                },
+                {
+                  "required": [
+                    "resolvedAt"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "APPROVAL_REQUESTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "expiresAt"
+            ],
+            "properties": {
+              "actorType": {
+                "const": "SYSTEM"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "APPROVAL_APPROVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "validUntil"
+            ],
+            "properties": {
+              "actorType": {
+                "const": "EMPLOYEE"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "APPROVAL_REJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "actorType": {
+                "const": "EMPLOYEE"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "APPROVAL_EXPIRED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "actorType": {
+                "const": "SYSTEM"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "APPROVAL_BOUND"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "boundAgentRunId"
+            ],
+            "properties": {
+              "actorType": {
+                "const": "EMPLOYEE"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "APPROVAL_CONSUMED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "consumedByAuditEventId"
+            ],
+            "properties": {
+              "actorType": {
+                "const": "SYSTEM"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "A decision reason belongs to a human decision only.",
+      "if": {
+        "properties": {
+          "eventType": {
+            "enum": [
+              "APPROVAL_REQUESTED",
+              "APPROVAL_EXPIRED",
+              "APPROVAL_BOUND",
+              "APPROVAL_CONSUMED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "not": {
+              "required": [
+                "reason"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "toolCallPayload": {
+      "$comment": "No customer identifier: additionalProperties false keeps targetConsumerId out at every level. tool is optional because an audit row may be created without one (requested_tool is nullable). The outcome rules mirror backend/core-api AuditCompletion.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auditEventId",
+        "requestId",
+        "agentRunId",
+        "agentId",
+        "requestedAt"
+      ],
+      "properties": {
+        "auditEventId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "requestId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "agentRunId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "agentId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "tool": {
+          "type": "string",
+          "enum": [
+            "CREDIT_SCORE_READ",
+            "INCOME_READ",
+            "DEBT_READ"
+          ]
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "ALLOW",
+            "BLOCK",
+            "APPROVAL"
+          ]
+        },
+        "systemOutcome": {
+          "type": "string",
+          "enum": [
+            "COMPLETED",
+            "ERROR"
+          ]
+        },
+        "reasonCodes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          }
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "riskFlagged": {
+          "type": "boolean"
+        },
+        "policyVersion": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "approvalRequestId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "detectedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "resolvedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "A completed outcome reached the policy and carries its decision.",
+          "if": {
+            "properties": {
+              "systemOutcome": {
+                "const": "COMPLETED"
+              }
+            },
+            "required": [
+              "systemOutcome"
+            ]
+          },
+          "then": {
+            "required": [
+              "decision"
+            ]
+          }
+        },
+        {
+          "$comment": "No decision means the call failed before the policy: no policy fields are invented.",
+          "if": {
+            "not": {
+              "required": [
+                "decision"
+              ]
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "severity"
+                  ]
+                },
+                {
+                  "required": [
+                    "riskFlagged"
+                  ]
+                },
+                {
+                  "required": [
+                    "policyVersion"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "$comment": "Only an allowed call can fail after the policy (downstream failure); BLOCK/APPROVAL never ran the tool.",
+          "if": {
+            "properties": {
+              "systemOutcome": {
+                "const": "ERROR"
+              }
+            },
+            "required": [
+              "systemOutcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "decision": {
+                "const": "ALLOW"
+              },
+              "reasonCodes": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "$comment": "A decision that did not run the tool explains itself.",
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "BLOCK",
+                  "APPROVAL"
+                ]
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reasonCodes": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "dependentRequired": {
+        "severity": [
+          "riskFlagged"
+        ],
+        "riskFlagged": [
+          "severity"
+        ],
+        "decision": [
+          "severity",
+          "riskFlagged",
+          "policyVersion"
+        ]
+      }
+    },
+    "approvalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approvalRequestId",
+        "sequence",
+        "auditEventId",
+        "agentId",
+        "agentRunId",
+        "actorType"
+      ],
+      "properties": {
+        "approvalRequestId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "auditEventId": {
+          "$comment": "The audit row whose decision asked for the approval.",
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "agentId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "agentRunId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "requesterEmployeeId": {
+          "$comment": "Missing only on requests opened before V11 recorded the requester; no employee notification then.",
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "actorType": {
+          "type": "string",
+          "enum": [
+            "SYSTEM",
+            "EMPLOYEE"
+          ]
+        },
+        "actorId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED_BUSINESS_NEED",
+            "CUSTOMER_VERIFIED",
+            "SUSPICIOUS_ACTIVITY",
+            "OUTSIDE_TASK_SCOPE",
+            "OTHER"
+          ]
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "validUntil": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "boundAgentRunId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "consumedByAuditEventId": {
+          "$ref": "#/$defs/nonEmptyIdentifier"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "actorType": {
+                "const": "EMPLOYEE"
+              }
+            },
+            "required": [
+              "actorType"
+            ]
+          },
+          "then": {
+            "required": [
+              "actorId"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "actorId"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

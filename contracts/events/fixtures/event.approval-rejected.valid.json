@@ -1,0 +1,19 @@
+{
+  "eventId": "0b0c4a7e-1f3d-4c1a-9a2e-3f5b6c7d8e01",
+  "schemaVersion": 2,
+  "eventType": "APPROVAL_REJECTED",
+  "occurredAt": "2026-10-07T12:00:05.123456Z",
+  "aggregateType": "APPROVAL",
+  "aggregateId": "APR-1",
+  "partitionKey": "APR-1",
+  "payload": {
+    "approvalRequestId": "APR-1",
+    "auditEventId": "AUD-0",
+    "agentId": "LOAN-AGENT-01",
+    "agentRunId": "RUN-0",
+    "requesterEmployeeId": "EMP-101",
+    "sequence": 2,
+    "actorType": "EMPLOYEE",
+    "actorId": "EMP-201"
+  }
+}

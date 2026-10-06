@@ -1372,3 +1372,21 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
 다시 보내면, 첫 요청이 실제로는 커밋됐더라도 `200`을 받는다(§11 적용표). 시간 초과는 기록 실패를
 뜻하지 않는다 — Core가 요청을 늦게 처리해 커밋할 수 있다. 결과 기록의 최종 판단 근거는 Core의 감사
 행뿐이고, 끝내 도착하지 않은 결과는 Core의 조정 배치가 `OUTCOME_UNKNOWN`으로 드러낸다(docs/06 §10).
+
+## 18. Event v2 / 내부 이벤트 피드
+
+계약: `contracts/events/finguard-event-v2.schema.json`(fixture `contracts/events/fixtures`). 4b 설계: 감사 결과 확정과
+승인 전이를 **그 변경과 같은 트랜잭션에서** 아웃박스에 한 행씩 남기고, 소비자는 내부 이벤트 피드로 받는다.
+
+- 이벤트 종류: `TOOL_CALL_FINALIZED`, `TOOL_CALL_OUTCOME_UNKNOWN`, `TOOL_CALL_OUTCOME_RESOLVED`(감사 결과 확정),
+  `APPROVAL_REQUESTED`·`_APPROVED`·`_REJECTED`·`_EXPIRED`·`_BOUND`·`_CONSUMED`(승인 이벤트 표의 행마다 하나).
+  재전송·충돌(§11 적용표의 200 재전송, 409)은 이벤트를 만들지 않는다.
+- `occurredAt`은 그 전이의 DB 시각이다. `partitionKey`는 Tool Call이 agentId, 승인이 approvalRequestId다.
+- 원본 Prompt, 금융 응답, 자격 증명, 고객 식별자를 싣지 않는다. 스키마가 닫혀 있어 어느 깊이에도 다른 키가 들어갈 수
+  없다.
+- 전달은 **최소 1회**다. 소비자는 `eventId`로 중복을 걸러야 한다.
+- 스키마는 닫혀 있으므로 타입·필드 추가도 호환 변경이 아니다. 소비자를 먼저 배포하고 생산자를 배포한다. 의미가 바뀌면
+  `schemaVersion`을 올린다.
+
+소비자는 Core의 원천 표(감사·승인·아웃박스)를 직접 조회하지 않는다. 자기 상태(처리 기록·체크포인트)를 두는 저장소는
+가질 수 있다.

@@ -1,0 +1,25 @@
+{
+  "eventId": "0b0c4a7e-1f3d-4c1a-9a2e-3f5b6c7d8e01",
+  "schemaVersion": 2,
+  "eventType": "TOOL_CALL_FINALIZED",
+  "occurredAt": "2026-10-07T12:00:05.123456Z",
+  "aggregateType": "TOOL_CALL",
+  "aggregateId": "AUD-1",
+  "partitionKey": "LOAN-AGENT-01",
+  "payload": {
+    "auditEventId": "AUD-1",
+    "requestId": "6f1c2a10-0000-4000-8000-000000000001",
+    "agentRunId": "RUN-1",
+    "agentId": "LOAN-AGENT-01",
+    "tool": "CREDIT_SCORE_READ",
+    "requestedAt": "2026-10-07T12:00:00Z",
+    "decision": "BLOCK",
+    "systemOutcome": "COMPLETED",
+    "reasonCodes": [],
+    "severity": "HIGH",
+    "riskFlagged": true,
+    "policyVersion": "loan-review-policy-4",
+    "approvalRequestId": "APR-1",
+    "completedAt": "2026-10-07T12:00:01Z"
+  }
+}
