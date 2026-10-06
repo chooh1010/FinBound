@@ -54,6 +54,9 @@ finguard:
       enabled: ${APPROVAL_EXPIRY_ENABLED:true}
       interval: ${APPROVAL_EXPIRY_INTERVAL:10s}
       batch-size: ${APPROVAL_EXPIRY_BATCH_SIZE:100}
+    consume:
+      # 묶인 승인을 Context Resolve에서 쓴다. Core → Gateway → policy-4를 올린 뒤에 켠다(docs/04 §7).
+      enabled: ${APPROVAL_CONSUME_ENABLED:false}
 
 management:
   endpoints:

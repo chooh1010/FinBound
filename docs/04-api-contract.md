@@ -658,7 +658,10 @@ Context Resolver가 Scope 비교의 Single Source of Truth다.
 이 실행에 승인이 묶여 있으면 응답에 `"approval": {"approvalRequestId": "APR-...", "granted": true}`를 싣는다. Core는
 같은 트랜잭션에서 승인을 잠그고, `APPROVED`·미사용·`valid_until > DB now()`·도구와 자료 집합 일치를 다시 확인한 뒤
 `CONSUMED`로 바꾸고 이번 감사 행에 `approvalRequestId`를 적는다. 묶인 승인이 없거나 조건이 맞지 않으면
-`"approval": {"granted": false}`다. 승인은 **최대 한 번** 쓰인다 — 이후 OPA가 막거나 장애가 나도 되돌려 주지 않는다
+`"approval": {"granted": false}`다. 정책이 어차피 막을 호출 — Scope 중 하나라도 `VIOLATION`이거나 Prompt 공격이
+탐지된 호출 — 에는 승인을 쓰지 않고 `{"granted": false}`로 답한다. 승인은 되돌려 주지 않으므로 막힐 호출에 쓰면 그대로
+사라지기 때문이다. 같은 호출의 resolve 재시도(같은 `requestId`, 같은 고객·도구·자료)는 이미 쓴 승인을 다시
+`granted: true`로 돌려주고 새로 쓰지 않는다. 승인은 **최대 한 번** 쓰인다 — 이후 OPA가 막거나 장애가 나도 되돌려 주지 않는다
 (되돌려 주면 같은 승인으로 다시 실행할 수 있게 된다). 사용은 설정 `finguard.approval.consume.enabled`(기본 `false`)가 켜졌을 때만 한다. 꺼져 있으면 묶인 승인이 있어도
 `{"granted": false}`이고 승인은 그대로 남는다. 배포는 Core → Gateway → `loan-review-policy-4` 순서로 올린 뒤 이 설정을 켠다 —
 먼저 켜면 옛 정책이 승인을 무시하는 동안 승인만 소진된다.

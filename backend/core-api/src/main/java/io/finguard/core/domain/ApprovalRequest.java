@@ -216,6 +216,42 @@ public class ApprovalRequest {
         append(ApprovalEventType.BOUND, now, ApprovalActorType.EMPLOYEE, operatorEmployeeId, null);
     }
 
+    /**
+     * 묶인 실행의 이번 호출에 승인을 쓰고 참을 돌려준다. 기한 안이고 아직 쓰이지 않았으며, 호출의 고객·도구·자료 집합이
+     * 원래 요청과 같아야 한다. 맞지 않으면 아무것도 바꾸지 않고 거짓이다 — 이 호출은 승인 없이 판정된다.
+     *
+     * <p>같은 감사 행으로 같은 호출을 다시 부르면(resolve 재시도) 이미 쓴 승인을 참으로 돌려주고 이벤트를 더하지 않는다.
+     * 재시도도 고객·도구·자료가 같아야 한다 — 감사 행 id만 같다고 다른 호출에 승인을 실어 주지 않는다. 기한은 다시 보지
+     * 않는다. 쓴 시점에 이미 판정했다.
+     */
+    public boolean consume(
+            String agentRunId,
+            String callConsumerId,
+            Tool callTool,
+            Set<DataType> callData,
+            String auditEventId,
+            Instant now) {
+        boolean sameCall = agentRunId.equals(boundAgentRunId)
+                && targetConsumerId != null && targetConsumerId.equals(callConsumerId)
+                && requestedTool != null && requestedTool == callTool
+                && requestedDataKey != null && requestedDataKey.equals(dataKey(callData));
+        if (status == ApprovalStatus.CONSUMED) {
+            return sameCall && auditEventId.equals(consumedByAuditEventId);
+        }
+        boolean applicable = status == ApprovalStatus.APPROVED
+                && validUntil != null
+                && validUntil.isAfter(now)
+                && sameCall;
+        if (!applicable) {
+            return false;
+        }
+        status = ApprovalStatus.CONSUMED;
+        consumedByAuditEventId = auditEventId;
+        consumedAt = now;
+        append(ApprovalEventType.CONSUMED, now, ApprovalActorType.SYSTEM, null, null);
+        return true;
+    }
+
     private void requireDecidable(String approverId, Instant now) {
         if (approverId == null || approverId.equals(employeeId)) {
             throw new ApprovalDecisionException(

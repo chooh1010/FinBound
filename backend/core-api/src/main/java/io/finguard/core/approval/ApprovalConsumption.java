@@ -1,0 +1,73 @@
+package io.finguard.core.approval;
+
+import java.util.Optional;
+import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import io.finguard.core.domain.ApprovalRequest;
+import io.finguard.core.domain.AuditEvent;
+import io.finguard.core.domain.DataType;
+import io.finguard.core.domain.Tool;
+import io.finguard.core.repository.ApprovalRequestRepository;
+
+/**
+ * Context Resolve에서 이 실행에 묶인 승인을 이번 호출에 쓴다. docs/04 §7.
+ *
+ * <p>resolve 트랜잭션 안에서만 부른다(MANDATORY). 승인 사용과 감사 행 연결이 근거 기록과 함께 커밋되거나 함께
+ * 롤백된다. 승인은 <strong>최대 한 번</strong> 쓰인다 — 이후 OPA가 막거나 장애가 나도 되돌려 주지 않는다. 되돌려
+ * 주면 같은 승인으로 다시 실행할 수 있게 된다.
+ */
+@Service
+@EnableConfigurationProperties(ApprovalConsumeProperties.class)
+public class ApprovalConsumption {
+
+    private static final Logger log = LoggerFactory.getLogger(ApprovalConsumption.class);
+
+    private final ApprovalRequestRepository approvalRequests;
+    private final ApprovalConsumeProperties properties;
+
+    public ApprovalConsumption(ApprovalRequestRepository approvalRequests, ApprovalConsumeProperties properties) {
+        this.approvalRequests = approvalRequests;
+        this.properties = properties;
+    }
+
+    /** 쓴 승인의 id. 묶인 승인이 없거나, 조건이 맞지 않거나, 사용이 꺼져 있으면 비어 있다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<String> consume(
+            AuditEvent auditEvent, String targetConsumerId, Tool requestedTool, Set<DataType> requestedData) {
+        if (!properties.enabled()) {
+            return Optional.empty();
+        }
+        Optional<ApprovalRequest> bound = approvalRequests.findBoundForUpdate(auditEvent.getAgentRunId());
+        if (bound.isEmpty()) {
+            return Optional.empty();
+        }
+        ApprovalRequest request = bound.get();
+        boolean consumed = request.consume(
+                auditEvent.getAgentRunId(),
+                targetConsumerId,
+                requestedTool,
+                requestedData,
+                auditEvent.getAuditEventId(),
+                approvalRequests.databaseNow());
+        if (!consumed) {
+            // 승인은 그대로 남는다. 이 호출만 승인 없이 판정된다.
+            log.info(
+                    "Bound approval not used for this call approvalRequestId={} auditEventId={} status={}",
+                    request.getApprovalRequestId(),
+                    auditEvent.getAuditEventId(),
+                    request.getStatus());
+            return Optional.empty();
+        }
+        auditEvent.linkApproval(request.getApprovalRequestId());
+        // 잠금으로 읽은 관리 중인 엔티티다. merge(save)를 거치지 않고 flush한다(새 이벤트가 persist로 들어간다).
+        approvalRequests.flush();
+        return Optional.of(request.getApprovalRequestId());
+    }
+}

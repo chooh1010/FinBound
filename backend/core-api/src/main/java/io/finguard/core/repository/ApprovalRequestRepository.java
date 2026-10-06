@@ -22,6 +22,11 @@ public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest
     @Query("select r from ApprovalRequest r where r.approvalRequestId = :id")
     Optional<ApprovalRequest> findForUpdate(@Param("id") String id);
 
+    /** 이 실행에 묶인 승인. 묶기가 unique라 많아야 하나다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from ApprovalRequest r where r.boundAgentRunId = :agentRunId")
+    Optional<ApprovalRequest> findBoundForUpdate(@Param("agentRunId") String agentRunId);
+
     List<ApprovalRequest> findTop100ByStatusOrderByCreatedAtDesc(ApprovalStatus status);
 
     /**

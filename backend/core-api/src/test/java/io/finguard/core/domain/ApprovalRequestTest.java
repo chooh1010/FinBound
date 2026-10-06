@@ -103,6 +103,32 @@ class ApprovalRequestTest {
                         tuple(3, ApprovalEventType.EXPIRED, ApprovalActorType.SYSTEM, null));
     }
 
+    @Test
+    void consumesOnlyForTheSameCallAndRetriesOnlyTheSameCall() {
+        ApprovalRequest request = open();
+        Instant decidedAt = OPENED.plusSeconds(1);
+        request.approve("EMP-201", null, decidedAt, APPROVED_TTL);
+        request.bind("RUN-2", "EMP-101", "CUST-1001", TaskType.LOAN_REVIEW, "sha256:x", decidedAt.plusSeconds(1));
+        Set<DataType> data = Set.of(DataType.CREDIT_SCORE, DataType.INCOME);
+        Instant now = decidedAt.plusSeconds(2);
+
+        // 자료 집합이 다르면 쓰지 않는다.
+        assertThat(request.consume("RUN-2", "CUST-1001", Tool.CREDIT_SCORE_READ, Set.of(DataType.CREDIT_SCORE),
+                "AUD-2", now)).isFalse();
+        assertThat(request.getStatus()).isEqualTo(ApprovalStatus.APPROVED);
+
+        assertThat(request.consume("RUN-2", "CUST-1001", Tool.CREDIT_SCORE_READ, data, "AUD-2", now)).isTrue();
+        // 같은 감사 행의 재시도는 참이고, 기한이 지난 뒤여도 그렇다(쓴 시점에 판정했다).
+        assertThat(request.consume("RUN-2", "CUST-1001", Tool.CREDIT_SCORE_READ, data, "AUD-2",
+                now.plus(APPROVED_TTL))).isTrue();
+        // 감사 행이 같아도 호출이 다르거나, 다른 감사 행이면 거짓이다.
+        assertThat(request.consume("RUN-2", "CUST-9999", Tool.CREDIT_SCORE_READ, data, "AUD-2", now)).isFalse();
+        assertThat(request.consume("RUN-2", "CUST-1001", Tool.CREDIT_SCORE_READ, data, "AUD-3", now)).isFalse();
+        assertThat(request.getEvents()).extracting(ApprovalRequestEvent::getEventType)
+                .containsExactly(ApprovalEventType.REQUESTED, ApprovalEventType.APPROVED, ApprovalEventType.BOUND,
+                        ApprovalEventType.CONSUMED);
+    }
+
     private static ApprovalRequest open() {
         AuditEvent event = mock(AuditEvent.class);
         when(event.getDecision()).thenReturn(PolicyDecision.APPROVAL);
