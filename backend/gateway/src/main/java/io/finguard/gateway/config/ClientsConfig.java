@@ -10,6 +10,8 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration
+@org.springframework.boot.context.properties.EnableConfigurationProperties(
+    io.finguard.gateway.response.ResponseScanProperties.class)
 public class ClientsConfig {
 
     @Bean

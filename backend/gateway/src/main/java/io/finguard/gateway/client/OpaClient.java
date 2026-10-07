@@ -42,6 +42,10 @@ public class OpaClient {
             if (result.decision() == null) {
                 throw new OpaUnavailableException("OPA returned no decision");
             }
+            // MASK는 응답을 본 뒤에만 나온다(docs/04 §19). 호출 전 정책이 내면 계약 밖이다.
+            if (result.decision() == io.finguard.gateway.contract.PolicyDecision.MASK) {
+                throw new OpaUnavailableException("OPA returned a response-stage decision before the call");
+            }
             if (!result.decision().runsTool()
                     && (result.reasonCodes() == null || result.reasonCodes().isEmpty())) {
                 throw new OpaUnavailableException("OPA returned a non-ALLOW decision without reasons");

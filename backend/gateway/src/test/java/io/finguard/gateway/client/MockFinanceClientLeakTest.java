@@ -73,6 +73,21 @@ class MockFinanceClientLeakTest {
         assertThat(rendered(failure)).doesNotContain(MARKER);
     }
 
+    /** 본문은 상한(64 KiB)까지만 읽는다. 넘으면 해석하지 않고 도달한 실패로 끝낸다(docs/04 §19.4). */
+    @org.junit.jupiter.api.Test
+    void anOversizedBodyIsNotRead() {
+        String body = "{\"requestId\":\"REQ-1\",\"tool\":\"LOAN_APPLICATION_READ\",\"consumerId\":\"CUST-1001\","
+            + "\"result\":{\"documentText\":\"" + MARKER + "x".repeat(64 * 1024) + "\"}}";
+        server.stubFor(post(urlEqualTo("/internal/v1/finance/tool-calls"))
+            .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody(body)));
+
+        Throwable failure = catchThrowable(() -> client.execute(request, "REQ-1", "trace"));
+
+        assertThat(failure).isInstanceOfSatisfying(DownstreamUnavailableException.class,
+            e -> assertThat(e.downstreamReached()).isTrue());
+        assertThat(rendered(failure)).doesNotContain(MARKER);
+    }
+
     /** 로그가 예외를 찍는 모양 그대로(메시지·원인·suppressed 전부). */
     static String rendered(Throwable failure) {
         StringWriter out = new StringWriter();

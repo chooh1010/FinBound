@@ -37,6 +37,7 @@ import io.finguard.gateway.exception.AuditWriteException;
 import io.finguard.gateway.exception.DownstreamTimeoutException;
 import io.finguard.gateway.exception.DownstreamUnavailableException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.finguard.gateway.response.ResponseInspectors;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
@@ -184,7 +185,9 @@ class OutcomeDeliveryFailureTest {
         final DownstreamClient downstream = mock(DownstreamClient.class);
         final SimpleMeterRegistry meters = new SimpleMeterRegistry();
         final ToolCallEnforcementService service =
-            new ToolCallEnforcementService(authorization, core, downstream, CLOCK, meters);
+            new ToolCallEnforcementService(
+                authorization, core, downstream, CLOCK,
+                meters, ResponseInspectors.disabled(CLOCK));
     }
 
     private record Run(EnforcementResult result, SimpleMeterRegistry meters) {

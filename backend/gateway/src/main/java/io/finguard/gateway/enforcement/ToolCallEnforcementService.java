@@ -35,6 +35,8 @@ import io.finguard.gateway.exception.DownstreamTimeoutException;
 import io.finguard.gateway.exception.DownstreamUnavailableException;
 import io.finguard.gateway.exception.DuplicateRequestException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.finguard.gateway.response.ResponseInspector;
+import io.finguard.gateway.response.ResponseInspector.Inspection;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -70,19 +72,23 @@ public class ToolCallEnforcementService {
     private final CoreClient coreClient;
     private final DownstreamClient downstreamClient;
     private final Clock clock;
+    private final ResponseInspector responseInspector;
     private final Counter outcomeDeliveryUnconfirmed;
     private final Counter outcomeDeliveryConflict;
     private final Counter outcomeDeliveryRejected;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ToolCallEnforcementService(AuthorizationService authorizationService,
                                       CoreClient coreClient,
                                       DownstreamClient downstreamClient,
                                       Clock clock,
-                                      MeterRegistry meterRegistry) {
+                                      MeterRegistry meterRegistry,
+                                      ResponseInspector responseInspector) {
         this.authorizationService = authorizationService;
         this.coreClient = coreClient;
         this.downstreamClient = downstreamClient;
         this.clock = clock;
+        this.responseInspector = responseInspector;
         // "실패"나 "유실"이라 부르지 않는다. 시간 초과는 Core가 늦게 처리해 커밋했을 수도 있다
         // (F1 단위 0 Run B). 유실 여부는 Core의 조정 배치가 감사 행으로 판단한다.
         this.outcomeDeliveryUnconfirmed = Counter.builder("audit.outcome.delivery.unconfirmed")
@@ -147,6 +153,16 @@ public class ToolCallEnforcementService {
             return block(requestId, "DUPLICATE_REQUEST");
         }
 
+        // 응답을 검사해야 하는 Tool인데 검사가 꺼져 있으면 판정·호출 전에 끝낸다. 검사 없이 문서를 내보내는 경로는 없다.
+        if (responseInspector.scans(request.tool()) && !responseInspector.enabled()) {
+            safeUpdateOutcome(identity, requestId, traceparent, scanDisabledOutcome(clock.instant()));
+            EnforcementResult result = new EnforcementResult(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ToolCallResponse.systemError(requestId, "RESPONSE_SCAN_DISABLED", List.of("RESPONSE_SCAN_DISABLED")));
+            remember(requestId, result);
+            return result;
+        }
+
         AuthorizationOutcome outcome = authorizationService.decide(
             identity, request, requestId, traceparent, requestedAt);
         // 판정마다 갈래를 따로 둔다. 예전 "ALLOW가 아니면 차단"은 새 판정을 차단으로 기록했다.
@@ -165,6 +181,8 @@ public class ToolCallEnforcementService {
                 remember(requestId, result);
                 yield result;
             }
+            // OpaClient가 호출 전 MASK를 거부한다. 여기 닿으면 계약 밖이라 실행하지 않는다.
+            case MASK -> throw new IllegalStateException("A request-stage decision cannot be MASK");
         };
     }
 
@@ -176,6 +194,10 @@ public class ToolCallEnforcementService {
         Instant downstreamStarted = clock.instant();
         try {
             DownstreamToolResult downstream = downstreamClient.execute(request, requestId, traceparent);
+            if (responseInspector.scans(request.tool())) {
+                return releaseInspected(identity, request, requestId, traceparent, outcome, downstream,
+                    downstreamStarted);
+            }
             long latencyMs = Duration.between(downstreamStarted, clock.instant()).toMillis();
             EnforcementResult result = new EnforcementResult(
                 HttpStatus.OK,
@@ -194,6 +216,104 @@ public class ToolCallEnforcementService {
                 identity, requestId, traceparent, outcome, clock.instant(),
                 "DOWNSTREAM_TIMEOUT", true, HttpStatus.GATEWAY_TIMEOUT);
         }
+    }
+
+    /**
+     * 응답 단계(docs/04 §19.4). 문서를 검사해 원문(ALLOW)·가린 문서(MASK)·결과 없음(BLOCK) 중 하나로 끝낸다. 실패는 모두
+     * 결과 없이 끝난다. Agent에게 가는 결과는 믿을 수 있는 필드로만 새로 만든다 — 하위 응답을 복사하지 않는다.
+     */
+    private EnforcementResult releaseInspected(VerifiedAgentIdentity identity,
+                                               ToolCallRequest request,
+                                               String requestId,
+                                               String traceparent,
+                                               AuthorizationOutcome outcome,
+                                               DownstreamToolResult downstream,
+                                               Instant downstreamStarted) {
+        String document = boundDocument(downstream, request, requestId);
+        Inspection inspection = document == null
+            ? Inspection.failed("DOWNSTREAM_ERROR", "MOCK_FINANCE")
+            : responseInspector.inspect(requestId, request.tool(), request.targetConsumerId(), document);
+        Instant completedAt = clock.instant();
+        long latencyMs = Duration.between(downstreamStarted, completedAt).toMillis();
+        EnforcementResult result = switch (inspection.kind()) {
+            case RELEASED -> {
+                Map<String, Object> released = new LinkedHashMap<>();
+                released.put("tool", request.tool());
+                released.put("consumerId", request.targetConsumerId());
+                released.put("documentText", inspection.releasedText());
+                ResponseInspector.ResponseDecision decision = inspection.decision();
+                yield new EnforcementResult(HttpStatus.OK, decision.decision() == PolicyDecision.MASK
+                    ? ToolCallResponse.mask(requestId, released, decision.reasonCodes())
+                    : ToolCallResponse.allow(requestId, released));
+            }
+            case BLOCKED -> block(requestId, inspection.decision().reasonCodes());
+            case FAILED -> new EnforcementResult(
+                "DOWNSTREAM_ERROR".equals(inspection.reasonCode())
+                    ? HttpStatus.BAD_GATEWAY
+                    : HttpStatus.SERVICE_UNAVAILABLE,
+                ToolCallResponse.systemError(requestId, inspection.reasonCode(), List.of(inspection.reasonCode())));
+        };
+        safeUpdateOutcome(identity, requestId, traceparent,
+            responseOutcome(outcome, inspection, completedAt, latencyMs));
+        remember(requestId, result);
+        return result;
+    }
+
+    /**
+     * 하위 응답이 이 요청의 문서인지. requestId·Tool·고객이 요청과 같고 결과가 정확히 {@code documentText} 하나여야 한다.
+     * 아니면 null — 다른 고객의 문서나 여분 필드가 섞인 응답을 검사하지도 내보내지도 않는다.
+     */
+    private static String boundDocument(DownstreamToolResult downstream, ToolCallRequest request, String requestId) {
+        if (downstream == null || !requestId.equals(downstream.requestId()) || downstream.tool() != request.tool()
+                || !request.targetConsumerId().equals(downstream.consumerId()) || downstream.result() == null
+                || !downstream.result().keySet().equals(Set.of("documentText"))
+                || !(downstream.result().get("documentText") instanceof String document)) {
+            return null;
+        }
+        return document;
+    }
+
+    /**
+     * 응답 단계 결과(docs/04 §19.1). 최종 판정은 하나다: 사유는 두 단계의 합, severity는 높은 쪽, riskFlagged는 OR.
+     * policyVersion은 호출 전 정책 버전이고 응답 정책 버전은 responseScan에 있다. 검사가 실패하면 건수를 남기지 않는다.
+     */
+    private AuditOutcome responseOutcome(AuthorizationOutcome outcome, Inspection inspection, Instant completedAt,
+                                         long latencyMs) {
+        if (inspection.kind() == Inspection.Kind.FAILED) {
+            return new AuditOutcome(
+                PolicyDecision.ALLOW, "ERROR", Set.of(inspection.reasonCode()), true, false, false, null, latencyMs,
+                inspection.errorLocation(), behaviorRisk(outcome), outcome.severity(), outcome.riskFlagged(),
+                outcome.policyVersion(), completedAt, outcome.policyInput(), "RESPONSE", null);
+        }
+        ResponseInspector.ResponseDecision decision = inspection.decision();
+        Set<String> reasons = new java.util.TreeSet<>(outcome.reasonCodes());
+        reasons.addAll(decision.reasonCodes());
+        boolean released = inspection.kind() == Inspection.Kind.RELEASED;
+        Map<String, Object> scan = new LinkedHashMap<>();
+        scan.put("detectorVersion", inspection.scan().detectorVersion());
+        scan.put("policyVersion", decision.policyVersion());
+        Map<String, Object> counts = new LinkedHashMap<>();
+        for (String category : List.of("RRN", "ACCOUNT_NUMBER", "PHONE_NUMBER", "OTHER_CUSTOMER")) {
+            counts.put(category, inspection.scan().counts().get(category));
+        }
+        scan.put("counts", counts);
+        return new AuditOutcome(
+            decision.decision(), "COMPLETED", reasons, true, released, released, released ? 1 : null, latencyMs,
+            null, behaviorRisk(outcome), higherSeverity(outcome.severity(), decision.severity()),
+            outcome.riskFlagged() || decision.riskFlagged(), outcome.policyVersion(), completedAt,
+            outcome.policyInput(), "RESPONSE", scan);
+    }
+
+    private static String higherSeverity(String first, String second) {
+        List<String> order = List.of("LOW", "MEDIUM", "HIGH", "CRITICAL");
+        return order.indexOf(first) >= order.indexOf(second) ? first : second;
+    }
+
+    /** 검사 스위치 꺼짐: 판정도 호출도 하지 않았다(docs/04 §19.1). */
+    private static AuditOutcome scanDisabledOutcome(Instant completedAt) {
+        return new AuditOutcome(
+            null, "ERROR", Set.of("RESPONSE_SCAN_DISABLED"), false, false, false, null, null, "GATEWAY", null, null,
+            null, null, completedAt, null);
     }
 
     private EnforcementResult recordDownstreamError(VerifiedAgentIdentity identity,

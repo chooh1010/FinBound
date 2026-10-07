@@ -16,8 +16,20 @@ public record ToolCallResponse(
     List<String> reasonCodes,
     String error
 ) {
+    /** 결과(금융 값, 문서)는 빼고 찍는다. 기본 toString은 result를 통째로 싣는다. */
+    @Override
+    public String toString() {
+        return "ToolCallResponse[requestId=" + requestId + ", decision=" + decision + ", reasonCodes=" + reasonCodes
+            + ", error=" + error + ", result=" + (result == null ? "absent" : "present") + "]";
+    }
+
     public static ToolCallResponse allow(String requestId, Map<String, Object> result) {
         return new ToolCallResponse(requestId, PolicyDecision.ALLOW, result, null, null);
+    }
+
+    /** 응답 속 개인정보를 범주 표시로 가린 결과를 내보낸다. 무엇을 가렸는지 사유로 말한다(docs/04 §19). */
+    public static ToolCallResponse mask(String requestId, Map<String, Object> result, List<String> reasonCodes) {
+        return new ToolCallResponse(requestId, PolicyDecision.MASK, result, reasonCodes, null);
     }
 
     public static ToolCallResponse block(String requestId, List<String> reasonCodes) {

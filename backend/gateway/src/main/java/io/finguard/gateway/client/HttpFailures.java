@@ -36,6 +36,11 @@ public final class HttpFailures {
         return sanitized;
     }
 
+    /** 정해진 설명(예: {@code "status=404"})만 담은 원인. 받은 내용을 넣지 않는다. */
+    public static SanitizedHttpFailure of(String description) {
+        return new SanitizedHttpFailure(description);
+    }
+
     /** 종류·상태 코드만 담는다. 원인을 갖지 않는다. */
     public static final class SanitizedHttpFailure extends RuntimeException {
 
