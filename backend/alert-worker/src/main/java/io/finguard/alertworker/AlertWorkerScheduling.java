@@ -53,8 +53,16 @@ class AlertWorkerScheduling implements SmartLifecycle {
         }
         ScheduledExecutorService running = executor;
         if (running != null && !running.isShutdown()) {
-            running.schedule(this::run, delayAfter(worker.consecutiveFailures()), TimeUnit.MILLISECONDS);
+            running.schedule(this::run, nextDelay(), TimeUnit.MILLISECONDS);
         }
+    }
+
+    /** 꽉 찬 묶음을 처리했으면 바로(drain-when-full), 아니면 기본 간격 또는 실패 뒤 백오프. */
+    long nextDelay() {
+        if (properties.drainWhenFull() && worker.lastPageFull() && worker.consecutiveFailures() == 0) {
+            return 0;
+        }
+        return delayAfter(worker.consecutiveFailures());
     }
 
     /** 실패가 없으면 기본 간격, 있으면 두 배씩 늘린 간격(최대 30초). */

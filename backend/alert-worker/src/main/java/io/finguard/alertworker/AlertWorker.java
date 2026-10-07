@@ -1,5 +1,6 @@
 package io.finguard.alertworker;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 /**
  * 피드를 한 번 읽어 처리한다. docs/04 §18.
@@ -49,7 +51,8 @@ public class AlertWorker {
     private final Counter duplicates;
     private final Counter feedUnavailable;
     private final AtomicReference<String> haltReason = new AtomicReference<>();
-    private final AtomicReference<Instant> lastOccurredAt = new AtomicReference<>();
+    private final Timer deliveryLag;
+    private volatile boolean lastPageFull;
     private final AtomicInteger consecutiveFailures = new AtomicInteger();
     private long failingPosition = -1;
     private int failuresAtPosition;
@@ -74,9 +77,11 @@ public class AlertWorker {
         Gauge.builder("alert_worker.integrity_halt", haltReason, reason -> reason.get() == null ? 0 : 1)
                 .description("1 while the worker is stopped at an untrusted event or a refused request")
                 .register(registry);
-        Gauge.builder("alert_worker.feed.lag_seconds", lastOccurredAt, last -> last.get() == null
-                        ? 0 : (Instant.now().toEpochMilli() - last.get().toEpochMilli()) / 1000.0)
-                .description("Now minus the occurredAt of the last processed event")
+        // 처리한 이벤트마다 발생부터 처리까지 걸린 시간. 예전 lag_seconds 게이지는 마지막 처리 이벤트 기준이라 한가할 때도
+        // 계속 늘어났다 — 적체를 재는 데 쓸 수 없었다.
+        this.deliveryLag = Timer.builder("alert_worker.delivery.lag")
+                .description("occurredAt to processing, per processed event")
+                .publishPercentiles(0.5, 0.95, 0.99)
                 .register(registry);
     }
 
@@ -85,6 +90,7 @@ public class AlertWorker {
         if (haltReason.get() != null) {
             return 0;
         }
+        lastPageFull = false;
         Checkpoint checkpoint = loadCheckpoint();
         FeedClient.Page page;
         try {
@@ -123,6 +129,9 @@ public class AlertWorker {
             failingPosition = -1;
             failuresAtPosition = 0;
             consecutiveFailures.set(0);
+            // 꽉 찬 묶음을 실제로 새로 처리했으면 뒤에 더 있을 수 있다. 다음 폴링을 미루지 않게 알린다. 새로 처리한 것이
+            // 없으면(중복뿐이거나 다른 인스턴스가 먼저 갔으면) 간격을 기다린다 — 피드를 쉬지 않고 두드리지 않게.
+            lastPageFull = fresh > 0 && page.events().size() >= properties.batchSize();
         }
         return fresh;
     }
@@ -162,6 +171,7 @@ public class AlertWorker {
 
     private int commit(Checkpoint from, String generation, long nextAfter, List<Verified> events) {
         List<AlertRules.Raised> raised = new ArrayList<>();
+        List<Instant> freshOccurredAt = new ArrayList<>();
         Integer fresh = transaction.execute(status -> {
             // 비교 후 갱신. 다른 인스턴스가 먼저 같은 배치를 처리했으면 아무것도 하지 않는다.
             int moved = jdbc.update(
@@ -182,6 +192,7 @@ public class AlertWorker {
                     continue;
                 }
                 raised.addAll(rules.apply(event));
+                freshOccurredAt.add(Instant.parse(event.get("occurredAt").asText()));
                 handled++;
             }
             return handled;
@@ -193,8 +204,12 @@ public class AlertWorker {
         // 커밋된 뒤에만 알린다. 롤백된 경보를 로그·지표가 세면 거짓이 된다.
         raised.forEach(rules::announce);
         processed.increment(fresh);
-        if (!events.isEmpty()) {
-            lastOccurredAt.set(Instant.parse(events.get(events.size() - 1).event().get("occurredAt").asText()));
+        // 새로 처리한 이벤트만 잰다(중복은 이미 한 번 잰 것이다). occurredAt은 Core DB 시계, now는 워커 시계다 — 같은
+        // 호스트가 아니면 시계 차이가 섞인다. 음수는 0으로 둔다.
+        Instant now = Instant.now();
+        for (Instant occurredAt : freshOccurredAt) {
+            Duration lag = Duration.between(occurredAt, now);
+            deliveryLag.record(lag.isNegative() ? Duration.ZERO : lag);
         }
         return fresh;
     }
@@ -237,6 +252,11 @@ public class AlertWorker {
     /** 멈춘 이유. 돌고 있으면 null이다. */
     public String haltReason() {
         return haltReason.get();
+    }
+
+    /** 마지막 폴링이 꽉 찬 묶음을 성공적으로 처리했는가. 그러면 다음 폴링을 바로 한다. */
+    boolean lastPageFull() {
+        return lastPageFull;
     }
 
     /** 이어진 실패 횟수(피드 불가·믿을 수 없는 데이터). 성공하면 0으로 돌아간다. 폴링 간격을 늘리는 데 쓴다. */

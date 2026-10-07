@@ -149,6 +149,40 @@ class AlertWorkerTest {
         assertThat(worker.haltReason()).isNull();
     }
 
+    /** 꽉 찬 묶음(batch-size 3)을 처리하면 다음 폴링을 바로 하라고 알린다. 마지막 덜 찬 묶음 뒤에는 간격을 기다린다. */
+    @Test
+    void fullPageAsksForTheNextPollRightAway() throws Exception {
+        for (int i = 0; i < 4; i++) {
+            add(toolCall("TOOL_CALL_FINALIZED", "ALLOW", false, "2026-10-07T12:00:0" + i + "Z"));
+        }
+        serve();
+
+        worker.runOnce();
+        assertThat(worker.lastPageFull()).isTrue();
+        worker.runOnce();
+        assertThat(worker.lastPageFull()).isFalse();
+    }
+
+    /** 중복뿐인 꽉 찬 묶음은 새로 처리한 것이 없다. 바로 다시 읽지 않는다(피드를 쉬지 않고 두드리지 않게). */
+    @Test
+    void fullPageOfDuplicatesDoesNotAskForAnImmediatePoll() throws Exception {
+        List<String> events = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            events.add(toolCall("TOOL_CALL_FINALIZED", "ALLOW", false, "2026-10-07T12:00:0" + i + "Z"));
+        }
+        // 같은 세 이벤트가 피드에 두 번 나온다(번호는 다르다). 두 번째 묶음은 중복뿐이다.
+        events.forEach(this::add);
+        events.forEach(this::add);
+        serve();
+
+        worker.runOnce();
+        assertThat(worker.lastPageFull()).isTrue();
+        worker.runOnce();
+
+        assertThat(count("consumed_events")).isEqualTo(3);
+        assertThat(worker.lastPageFull()).isFalse();
+    }
+
     @Test
     void unknownOutcomeAlertsImmediately() throws Exception {
         add(toolCall("TOOL_CALL_OUTCOME_UNKNOWN", null, null, "2026-10-07T12:00:00Z"));

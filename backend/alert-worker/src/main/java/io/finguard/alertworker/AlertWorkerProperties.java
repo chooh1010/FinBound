@@ -25,6 +25,8 @@ import jakarta.validation.constraints.Positive;
  * @param blockThreshold 버킷 안 BLOCK 수가 이 값 이상이면 BLOCK_BURST
  * @param riskFlagThreshold 버킷 안 위험 표시 수가 이 값 이상이면 RISK_FLAG_BURST
  * @param integrityRetries 같은 위치에서 무결성 실패가 이만큼 이어지면 멈추고 사건으로 남긴다
+ * @param drainWhenFull 받은 묶음이 꽉 찼으면 간격을 기다리지 않고 바로 다시 읽는다. 끄면 언제나 간격을 기다린다 — 그러면 처리
+ *     한계가 {@code batchSize / pollInterval}로 고정된다
  */
 @Validated
 @ConfigurationProperties(prefix = "finguard.alert-worker")
@@ -37,7 +39,8 @@ public record AlertWorkerProperties(
         @DefaultValue("60s") @NotNull Duration window,
         @DefaultValue("5") @Positive int blockThreshold,
         @DefaultValue("3") @Positive int riskFlagThreshold,
-        @DefaultValue("5") @Positive int integrityRetries) {
+        @DefaultValue("5") @Positive int integrityRetries,
+        @DefaultValue("true") boolean drainWhenFull) {
 
     @AssertTrue(message = "poll-interval and window must be positive")
     public boolean hasPositiveDurations() {
