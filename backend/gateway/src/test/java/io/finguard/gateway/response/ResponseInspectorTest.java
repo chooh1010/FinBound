@@ -126,13 +126,24 @@ class ResponseInspectorTest {
             + "'severity':'LOW','riskFlagged':false,'policyVersion':'loan-review-policy-4'}}",
         "{'result':{'decision':'APPROVAL','reasonCodes':['X'],'severity':'LOW','riskFlagged':false,"
             + "'policyVersion':'response-policy-1'}}",
-        "{}"
+        "{}",
+        // 정책이 정한 위험 등급·표시와 다르다(MASK는 LOW·false)
+        "{'result':{'decision':'MASK','reasonCodes':['RRN_MASKED','PHONE_NUMBER_MASKED'],'severity':'HIGH',"
+            + "'riskFlagged':false,'policyVersion':'response-policy-1'}}"
     })
     void decisionThatContradictsTheCountsIsNeverEnforced(String raw) throws Exception {
         ResponseInspector.Scan scan = piiScan();
 
         assertThatThrownBy(() -> ResponseInspector.verifiedDecision(JSON.readTree(raw.replace('\'', '"')), scan))
             .isInstanceOf(ResponseInspector.UntrustedException.class);
+    }
+
+    /** 문서 뒤에 다른 JSON이 이어 붙은 응답은 해석하지 않는다. */
+    @Test
+    void trailingContentAfterTheJsonIsRefused() {
+        assertThatThrownBy(() -> StrictJson.read(
+            "{\"a\":1} {\"b\":2}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "test"))
+            .isInstanceOf(ResponseScanUnavailableException.class);
     }
 
     @Test

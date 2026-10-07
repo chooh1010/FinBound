@@ -199,9 +199,14 @@ public class ToolCallEnforcementService {
                     downstreamStarted);
             }
             long latencyMs = Duration.between(downstreamStarted, clock.instant()).toMillis();
-            EnforcementResult result = new EnforcementResult(
-                HttpStatus.OK,
-                ToolCallResponse.allow(requestId, downstreamResult(downstream)));
+            Map<String, Object> trusted = boundNumericResult(downstream, request, requestId);
+            if (trusted == null) {
+                // 이 요청의 값이 아니거나 여분 필드가 섞인 응답은 내보내지 않는다. 응답은 받았으므로 도달했다.
+                return recordDownstreamError(
+                    identity, requestId, traceparent, outcome, clock.instant(),
+                    "DOWNSTREAM_ERROR", true, HttpStatus.BAD_GATEWAY);
+            }
+            EnforcementResult result = new EnforcementResult(HttpStatus.OK, ToolCallResponse.allow(requestId, trusted));
             safeUpdateOutcome(identity, requestId, traceparent, allowOutcome(outcome, clock.instant(), latencyMs));
             remember(requestId, result);
             return result;
@@ -280,8 +285,11 @@ public class ToolCallEnforcementService {
     private AuditOutcome responseOutcome(AuthorizationOutcome outcome, Inspection inspection, Instant completedAt,
                                          long latencyMs) {
         if (inspection.kind() == Inspection.Kind.FAILED) {
+            // 호출 전 판정의 사유도 지우지 않는다(사유는 두 단계의 합, docs/04 §19.1).
+            Set<String> failureReasons = new java.util.TreeSet<>(outcome.reasonCodes());
+            failureReasons.add(inspection.reasonCode());
             return new AuditOutcome(
-                PolicyDecision.ALLOW, "ERROR", Set.of(inspection.reasonCode()), true, false, false, null, latencyMs,
+                PolicyDecision.ALLOW, "ERROR", failureReasons, true, false, false, null, latencyMs,
                 inspection.errorLocation(), behaviorRisk(outcome), outcome.severity(), outcome.riskFlagged(),
                 outcome.policyVersion(), completedAt, outcome.policyInput(), "RESPONSE", null);
         }
@@ -473,11 +481,29 @@ public class ToolCallEnforcementService {
         return new EnforcementResult(HttpStatus.FORBIDDEN, ToolCallResponse.block(requestId, reasonCodes));
     }
 
-    private Map<String, Object> downstreamResult(DownstreamToolResult downstream) {
+    /** 숫자 Tool이 돌려줘야 하는 값 하나(docs/04 §13.1). */
+    private static final Map<io.finguard.gateway.contract.FinancialTool, String> NUMERIC_FIELDS = Map.of(
+        io.finguard.gateway.contract.FinancialTool.CREDIT_SCORE_READ, "creditScore",
+        io.finguard.gateway.contract.FinancialTool.INCOME_READ, "annualIncome",
+        io.finguard.gateway.contract.FinancialTool.DEBT_READ, "totalDebt");
+
+    /**
+     * 숫자 Tool의 결과를 믿는 필드로만 새로 만든다. requestId·Tool·고객이 요청과 같고 결과가 정확히 그 Tool의 숫자 값 하나여야
+     * 한다 — 하위 응답을 복사하지 않는다(여분 필드나 다른 고객의 값이 Agent·캐시로 나가지 않게).
+     */
+    private static Map<String, Object> boundNumericResult(DownstreamToolResult downstream, ToolCallRequest request,
+                                                          String requestId) {
+        String field = NUMERIC_FIELDS.get(request.tool());
+        if (field == null || downstream == null || !requestId.equals(downstream.requestId())
+                || downstream.tool() != request.tool() || !request.targetConsumerId().equals(downstream.consumerId())
+                || downstream.result() == null || !downstream.result().keySet().equals(Set.of(field))
+                || !(downstream.result().get(field) instanceof Number value)) {
+            return null;
+        }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("tool", downstream.tool());
-        result.put("consumerId", downstream.consumerId());
-        result.putAll(downstream.result());
+        result.put("tool", request.tool());
+        result.put("consumerId", request.targetConsumerId());
+        result.put(field, value);
         return result;
     }
 

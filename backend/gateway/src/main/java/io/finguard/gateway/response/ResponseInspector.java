@@ -201,7 +201,11 @@ public class ResponseInspector {
             }
         }
         boolean otherCustomer = scan.counts().get("OTHER_CUSTOMER") > 0;
-        boolean consistent = switch (decision) {
+        // 위험 등급과 표시도 정책(docs/04 §19.3)이 정한 값이어야 한다: BLOCK은 HIGH·true, MASK·ALLOW는 LOW·false.
+        boolean expectedRisk = decision == PolicyDecision.BLOCK
+            ? "HIGH".equals(severity) && riskFlagged.booleanValue()
+            : "LOW".equals(severity) && !riskFlagged.booleanValue();
+        boolean consistent = expectedRisk && switch (decision) {
             case BLOCK -> otherCustomer && reasons.equals(List.of(OTHER_CUSTOMER_REASON));
             case MASK -> !otherCustomer && !expectedMaskReasons.isEmpty()
                 && reasons.size() == expectedMaskReasons.size() && new TreeSet<>(reasons).equals(expectedMaskReasons);

@@ -10,7 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 final class StrictJson {
 
     private static final ObjectMapper JSON = new ObjectMapper()
-        .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+        .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+        .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     private StrictJson() {
     }

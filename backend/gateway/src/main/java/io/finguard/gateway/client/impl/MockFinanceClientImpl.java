@@ -34,7 +34,8 @@ public class MockFinanceClientImpl implements DownstreamClient {
     static final int MAX_RESPONSE_BYTES = 64 * 1024;
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
         new com.fasterxml.jackson.databind.ObjectMapper()
-            .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     private final RestClient restClient;
     private final String baseUrl;
@@ -71,6 +72,7 @@ public class MockFinanceClientImpl implements DownstreamClient {
                         throw new DownstreamUnavailableException("Mock finance API returned error status",
                             HttpFailures.of("status=" + status), true);
                     }
+                    requireJson(clientResponse.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
                     return parse(clientResponse.getBody());
                 });
             if (response == null || response.result() == null) {
@@ -96,15 +98,42 @@ public class MockFinanceClientImpl implements DownstreamClient {
      * 본문을 상한까지만 읽는다(docs/04 §19.4). 다 읽은 뒤 크기를 재면 큰 응답이 이미 메모리에 있다. 해석 실패는 응답을
      * 받은 뒤의 실패라 도달한 것으로 본다. 원인에는 받은 값을 싣지 않는다 — Jackson 예외는 메시지에 값을 싣는다.
      */
-    private static DownstreamToolResult parse(java.io.InputStream body) throws java.io.IOException {
-        byte[] bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
+    /** 받은 Content-Type 값은 원인에 싣지 않는다(InvalidMediaTypeException은 그 값을 메시지에 싣는다). */
+    private static void requireJson(String contentType) {
+        boolean json;
+        try {
+            json = contentType != null
+                && org.springframework.http.MediaType.APPLICATION_JSON.isCompatibleWith(
+                    org.springframework.http.MediaType.parseMediaType(contentType));
+        } catch (org.springframework.http.InvalidMediaTypeException e) {
+            json = false;
+        }
+        if (!json) {
+            throw new DownstreamUnavailableException("Mock finance response is not JSON",
+                HttpFailures.of("content type"), true);
+        }
+    }
+
+    private static DownstreamToolResult parse(java.io.InputStream body) {
+        byte[] bytes;
+        try {
+            bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
+        } catch (java.io.IOException e) {
+            // 상태 줄을 받은 뒤의 실패다 — 도달했다. 읽기 시간 초과는 시간 초과로 분류한다.
+            if (e instanceof java.net.SocketTimeoutException || e instanceof java.net.http.HttpTimeoutException) {
+                throw new DownstreamTimeoutException("Mock finance API timed out", HttpFailures.of(
+                    e.getClass().getSimpleName()));
+            }
+            throw new DownstreamUnavailableException("Mock finance response could not be read",
+                HttpFailures.of(e.getClass().getSimpleName()), true);
+        }
         if (bytes.length > MAX_RESPONSE_BYTES) {
             throw new DownstreamUnavailableException("Mock finance response exceeds the size limit",
                 HttpFailures.of("oversized"), true);
         }
         try {
             return JSON.readValue(bytes, DownstreamToolResult.class);
-        } catch (com.fasterxml.jackson.core.JacksonException e) {
+        } catch (java.io.IOException e) {
             throw new DownstreamUnavailableException("Mock finance response is unreadable",
                 HttpFailures.of(e.getClass().getSimpleName()), true);
         }

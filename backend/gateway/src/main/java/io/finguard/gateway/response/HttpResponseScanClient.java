@@ -1,7 +1,5 @@
 package io.finguard.gateway.response;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -60,28 +58,27 @@ public class HttpResponseScanClient implements ResponseScanClient {
             .header(REQUEST_ID_HEADER, requestId)
             .POST(HttpRequest.BodyPublishers.ofByteArray(StrictJson.write(body)))
             .build();
-        HttpResponse<InputStream> response;
+        // 응답 본문을 다 받을 때까지를 한 번의 제한 시간으로 잰다. HttpRequest.timeout은 헤더까지만 잰다.
+        HttpResponse<byte[]> response;
         try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        } catch (IOException exception) {
-            throw new ResponseScanUnavailableException("Response scanner call failed: "
-                + exception.getClass().getSimpleName());
+            response = http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+                .get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException exception) {
+            throw new ResponseScanUnavailableException("Response scanner timed out");
+        } catch (java.util.concurrent.ExecutionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            throw new ResponseScanUnavailableException(
+                "Response scanner call failed: " + cause.getClass().getSimpleName());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new ResponseScanUnavailableException("Response scanner call interrupted");
         }
-        try (InputStream stream = response.body()) {
-            if (response.statusCode() != 200) {
-                throw new ResponseScanUnavailableException("Response scanner status=" + response.statusCode());
-            }
-            byte[] bytes = stream.readNBytes(MAX_RESPONSE_BYTES + 1);
-            if (bytes.length > MAX_RESPONSE_BYTES) {
-                throw new ResponseScanUnavailableException("Response scanner response exceeds the size limit");
-            }
-            return StrictJson.read(bytes, "Response scanner");
-        } catch (IOException exception) {
-            throw new ResponseScanUnavailableException("Response scanner read failed: "
-                + exception.getClass().getSimpleName());
+        if (response.statusCode() != 200) {
+            throw new ResponseScanUnavailableException("Response scanner status=" + response.statusCode());
         }
+        if (response.body().length > MAX_RESPONSE_BYTES) {
+            throw new ResponseScanUnavailableException("Response scanner response exceeds the size limit");
+        }
+        return StrictJson.read(response.body(), "Response scanner");
     }
 }

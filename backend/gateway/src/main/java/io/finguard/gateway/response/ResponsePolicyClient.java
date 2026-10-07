@@ -1,7 +1,5 @@
 package io.finguard.gateway.response;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -50,24 +48,27 @@ public class ResponsePolicyClient {
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofByteArray(StrictJson.write(Map.of("input", input))))
             .build();
+        // 응답 본문을 다 받을 때까지를 한 번의 제한 시간으로 잰다. HttpRequest.timeout은 헤더까지만 잰다.
+        HttpResponse<byte[]> response;
         try {
-            HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            try (InputStream stream = response.body()) {
-                if (response.statusCode() != 200) {
-                    throw new ResponseScanUnavailableException("Response policy status=" + response.statusCode());
-                }
-                byte[] bytes = stream.readNBytes(MAX_RESPONSE_BYTES + 1);
-                if (bytes.length > MAX_RESPONSE_BYTES) {
-                    throw new ResponseScanUnavailableException("Response policy response exceeds the size limit");
-                }
-                return StrictJson.read(bytes, "Response policy");
-            }
-        } catch (IOException exception) {
-            throw new ResponseScanUnavailableException("Response policy call failed: "
-                + exception.getClass().getSimpleName());
+            response = http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+                .get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException exception) {
+            throw new ResponseScanUnavailableException("Response policy timed out");
+        } catch (java.util.concurrent.ExecutionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            throw new ResponseScanUnavailableException(
+                "Response policy call failed: " + cause.getClass().getSimpleName());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new ResponseScanUnavailableException("Response policy call interrupted");
         }
+        if (response.statusCode() != 200) {
+            throw new ResponseScanUnavailableException("Response policy status=" + response.statusCode());
+        }
+        if (response.body().length > MAX_RESPONSE_BYTES) {
+            throw new ResponseScanUnavailableException("Response policy response exceeds the size limit");
+        }
+        return StrictJson.read(response.body(), "Response policy");
     }
 }

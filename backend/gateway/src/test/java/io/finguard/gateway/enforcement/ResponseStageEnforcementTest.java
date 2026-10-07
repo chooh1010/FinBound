@@ -210,6 +210,46 @@ class ResponseStageEnforcementTest {
         verify(downstream, times(1)).execute(any(), any(), any());
     }
 
+    /** 숫자 Tool도 하위 응답을 복사하지 않는다. 여분 필드나 다른 고객의 값이 섞이면 내보내지 않는다. */
+    @Test
+    void numericAnswerWithExtraFieldsOrAnotherCustomerIsNotReleased() {
+        ToolCallEnforcementService service = enabled();
+        allow();
+        ToolCallRequest credit = new ToolCallRequest("RUN-1", "PASS-1", FinancialTool.CREDIT_SCORE_READ,
+            "CUST-1001", List.of(FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+        when(downstream.execute(any(), eq("REQ-EXTRA-NUM"), any())).thenReturn(new DownstreamToolResult(
+            "REQ-EXTRA-NUM", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+            Map.of("creditScore", 812, "documentText", DOCUMENT)));
+        when(downstream.execute(any(), eq("REQ-OTHER-NUM"), any())).thenReturn(new DownstreamToolResult(
+            "REQ-OTHER-NUM", FinancialTool.CREDIT_SCORE_READ, "CUST-9999", Map.of("creditScore", 812)));
+
+        EnforcementResult extra = service.enforce(identity, credit, "REQ-EXTRA-NUM", "trace");
+        EnforcementResult other = service.enforce(identity, credit, "REQ-OTHER-NUM", "trace");
+
+        assertThat(extra.status().value()).isEqualTo(502);
+        assertThat(extra.body().result()).isNull();
+        assertThat(other.status().value()).isEqualTo(502);
+        assertThat(other.body().result()).isNull();
+        assertThat(outcome("REQ-EXTRA-NUM").downstreamReached()).isTrue();
+    }
+
+    /** 검사가 실패해도 호출 전 판정의 사유는 남는다(사유는 두 단계의 합). */
+    @Test
+    void failedScanKeepsTheRequestStageReasons() {
+        ToolCallEnforcementService service = enabled();
+        when(authorization.decide(any(), any(), any(), any(), any())).thenReturn(new AuthorizationOutcome(
+            new PolicyDecisionResult(PolicyDecision.ALLOW, "MEDIUM", true, List.of("BEHAVIOR_RISK_ALERT"),
+                "loan-review-policy-4"), 0.6));
+        returnDocument("REQ-KEEP", DOCUMENT);
+        when(scanner.scan(anyString(), anyString(), anyString(), anyString()))
+            .thenThrow(new ResponseScanUnavailableException("Response scanner timed out"));
+
+        service.enforce(identity, document, "REQ-KEEP", "trace");
+
+        assertThat(outcome("REQ-KEEP").reasonCodes())
+            .containsExactlyInAnyOrder("BEHAVIOR_RISK_ALERT", "RESPONSE_SCAN_UNAVAILABLE");
+    }
+
     private ToolCallEnforcementService enabled() {
         return new ToolCallEnforcementService(authorization, core, downstream, CLOCK, new SimpleMeterRegistry(),
             ResponseInspectors.enabled(scanner, policy, CLOCK));
