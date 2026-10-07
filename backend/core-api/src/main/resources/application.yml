@@ -67,6 +67,13 @@ finguard:
       enabled: ${EVENTS_SEQUENCER_ENABLED:true}
       interval: ${EVENTS_SEQUENCER_INTERVAL:200ms}
       batch-size: ${EVENTS_SEQUENCER_BATCH_SIZE:500}
+    # Kafka 비교 실험(finbound-kafka-comparison-spec §8). 기본 경로는 피드다. 켜면 번호가 매겨진 이벤트를 토픽으로도 보낸다.
+    kafka:
+      enabled: ${EVENTS_KAFKA_ENABLED:false}
+      bootstrap-servers: ${EVENTS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      topic: ${EVENTS_KAFKA_TOPIC:finguard.events.v2}
+      interval: ${EVENTS_KAFKA_INTERVAL:200ms}
+      batch-size: ${EVENTS_KAFKA_BATCH_SIZE:500}
     feed:
       # 피드 전용 읽기 Credential. 비우면 피드를 열지 않는다. 내부 Credential과 같으면 기동하지 않는다.
       credential: ${FINGUARD_EVENT_FEED_CREDENTIAL:}
