@@ -35,6 +35,7 @@ import io.finguard.gateway.exception.DownstreamTimeoutException;
 import io.finguard.gateway.exception.DownstreamUnavailableException;
 import io.finguard.gateway.exception.DuplicateRequestException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.finguard.gateway.metrics.PhaseTimer;
 import io.finguard.gateway.response.ResponseInspector;
 import io.finguard.gateway.response.ResponseInspector.Inspection;
 import io.micrometer.core.instrument.Counter;
@@ -73,6 +74,7 @@ public class ToolCallEnforcementService {
     private final DownstreamClient downstreamClient;
     private final Clock clock;
     private final ResponseInspector responseInspector;
+    private final PhaseTimer phases;
     private final Counter outcomeDeliveryUnconfirmed;
     private final Counter outcomeDeliveryConflict;
     private final Counter outcomeDeliveryRejected;
@@ -89,6 +91,7 @@ public class ToolCallEnforcementService {
         this.downstreamClient = downstreamClient;
         this.clock = clock;
         this.responseInspector = responseInspector;
+        this.phases = new PhaseTimer(meterRegistry);
         // "실패"나 "유실"이라 부르지 않는다. 시간 초과는 Core가 늦게 처리해 커밋했을 수도 있다
         // (F1 단위 0 Run B). 유실 여부는 Core의 조정 배치가 감사 행으로 판단한다.
         this.outcomeDeliveryUnconfirmed = Counter.builder("audit.outcome.delivery.unconfirmed")
@@ -129,7 +132,8 @@ public class ToolCallEnforcementService {
             if (completed != null) {
                 return completed.binding().equals(binding) ? completed.result() : duplicateRequestConflict(requestId);
             }
-            return executeFirstAttempt(identity, request, requestId, traceparent);
+            // "attempt"는 처음 처리하는 호출의 전체다. 캐시 재전송·중복 거부는 처리하지 않으므로 들지 않는다.
+            return phases.time("attempt", () -> executeFirstAttempt(identity, request, requestId, traceparent));
         } finally {
             inFlightRequests.remove(requestId);
         }
@@ -193,7 +197,8 @@ public class ToolCallEnforcementService {
                                                        AuthorizationOutcome outcome) {
         Instant downstreamStarted = clock.instant();
         try {
-            DownstreamToolResult downstream = downstreamClient.execute(request, requestId, traceparent);
+            DownstreamToolResult downstream =
+                phases.time("downstream", () -> downstreamClient.execute(request, requestId, traceparent));
             if (responseInspector.scans(request.tool())) {
                 return releaseInspected(identity, request, requestId, traceparent, outcome, downstream,
                     downstreamStarted);
@@ -237,7 +242,8 @@ public class ToolCallEnforcementService {
         String document = boundDocument(downstream, request, requestId);
         Inspection inspection = document == null
             ? Inspection.failed("DOWNSTREAM_ERROR", "MOCK_FINANCE")
-            : responseInspector.inspect(requestId, request.tool(), request.targetConsumerId(), document);
+            : phases.time("response_scan",
+                () -> responseInspector.inspect(requestId, request.tool(), request.targetConsumerId(), document));
         Instant completedAt = clock.instant();
         long latencyMs = Duration.between(downstreamStarted, completedAt).toMillis();
         EnforcementResult result = switch (inspection.kind()) {
@@ -450,7 +456,7 @@ public class ToolCallEnforcementService {
         // 결과 기록은 사용자 응답을 막지 않는다. 기록이 확인되지 않으면 드러내기만 하고,
         // 끝내 도착하지 않은 결과는 Core가 OUTCOME_UNKNOWN으로 드러낸다.
         try {
-            coreClient.updateAuditOutcome(identity, requestId, outcome, traceparent);
+            phases.time("outcome", () -> coreClient.updateAuditOutcome(identity, requestId, outcome, traceparent));
         } catch (AuditOutcomeConflictException e) {
             outcomeDeliveryConflict.increment();
             log.error("Audit outcome conflict: Core holds a different outcome requestId={} cause={}",

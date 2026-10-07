@@ -43,7 +43,10 @@ class AuthorizationServiceTest {
     private final AiClient ai = mock(AiClient.class);
     private final OpaClient opa = mock(OpaClient.class);
     private final HardLimitService hardLimit = mock(HardLimitService.class);
-    private final AuthorizationService service = new AuthorizationService(core, ai, opa, hardLimit);
+    private final io.micrometer.core.instrument.simple.SimpleMeterRegistry meters =
+        new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    private final AuthorizationService service =
+        new AuthorizationService(core, ai, opa, hardLimit, new io.finguard.gateway.metrics.PhaseTimer(meters));
 
     private final VerifiedAgentIdentity identity = VerifiedAgentIdentity.verified("LOAN-AGENT-01");
     private final ToolCallRequest request = new ToolCallRequest(
@@ -62,6 +65,20 @@ class AuthorizationServiceTest {
         assertThat(outcome.behaviorRisk()).isNull();
         // 판정에 닿지 못했다. 판정 입력을 지어내지 않는다.
         assertThat(outcome.policyInput()).isNull();
+    }
+
+    /** 실패한 맥락 조회도 그 단계의 시간으로 남는다. 뒤 단계는 시작하지 않았으므로 남지 않는다. */
+    @Test
+    void phaseTimesFollowTheStagesThatRan() {
+        when(core.resolveContext(any(), any(), any(), any()))
+            .thenThrow(new CoreUnavailableException("boom"));
+
+        service.decide(identity, request, "REQ-1", null, Instant.now());
+
+        assertThat(meters.get(io.finguard.gateway.metrics.PhaseTimer.METER).tag("phase", "context").timer().count())
+            .isEqualTo(1);
+        assertThat(meters.find(io.finguard.gateway.metrics.PhaseTimer.METER).tag("phase", "history").timer())
+            .isNull();
     }
 
     @Test
