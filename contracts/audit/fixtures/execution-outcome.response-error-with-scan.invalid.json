@@ -1,0 +1,27 @@
+{
+  "requestId": "REQ-504",
+  "decision": "ALLOW",
+  "decisionStage": "RESPONSE",
+  "systemOutcome": "ERROR",
+  "reasonCodes": [
+    "RESPONSE_SCAN_UNAVAILABLE"
+  ],
+  "downstreamReached": true,
+  "responseReleased": false,
+  "success": false,
+  "latencyMs": 1600,
+  "errorLocation": "AI_RISK",
+  "severity": "LOW",
+  "riskFlagged": false,
+  "completedAt": "2026-10-07T21:00:04+09:00",
+  "responseScan": {
+    "detectorVersion": "response-scan-1",
+    "policyVersion": "response-policy-1",
+    "counts": {
+      "RRN": 0,
+      "ACCOUNT_NUMBER": 0,
+      "PHONE_NUMBER": 0,
+      "OTHER_CUSTOMER": 0
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "requestId": "REQ-501",
+  "decisionStage": "RESPONSE",
+  "systemOutcome": "COMPLETED",
+  "downstreamReached": true,
+  "completedAt": "2026-10-07T21:00:01+09:00",
+  "decision": "BLOCK",
+  "reasonCodes": [
+    "OTHER_CUSTOMER_DATA_IN_RESPONSE"
+  ],
+  "responseReleased": false,
+  "success": false,
+  "latencyMs": 150,
+  "severity": "HIGH",
+  "riskFlagged": true,
+  "responseScan": {
+    "detectorVersion": "response-scan-1",
+    "policyVersion": "response-policy-1",
+    "counts": {
+      "RRN": 1,
+      "ACCOUNT_NUMBER": 0,
+      "PHONE_NUMBER": 0,
+      "OTHER_CUSTOMER": 1
+    }
+  },
+  "recordsRead": 1
+}

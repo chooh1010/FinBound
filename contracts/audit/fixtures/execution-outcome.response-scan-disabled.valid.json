@@ -1,0 +1,13 @@
+{
+  "requestId": "REQ-505",
+  "decisionStage": "REQUEST",
+  "systemOutcome": "ERROR",
+  "reasonCodes": [
+    "RESPONSE_SCAN_DISABLED"
+  ],
+  "downstreamReached": false,
+  "responseReleased": false,
+  "success": false,
+  "errorLocation": "GATEWAY",
+  "completedAt": "2026-10-07T21:00:05+09:00"
+}

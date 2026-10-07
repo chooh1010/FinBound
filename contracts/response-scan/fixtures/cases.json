@@ -1,0 +1,212 @@
+{
+  "$comment": "Cross-language response-scan cases (stage 5 SPEC §3.2). Offsets are UTF-16 code units, half-open [start, end). ai-risk (pytest) and the gateway (JUnit) both read this file. All values are synthetic.",
+  "cases": [
+    {
+      "name": "pii-mixed",
+      "note": "One of each masked category, hyphen form.",
+      "targetConsumerId": "CUST-1001",
+      "text": "신청인 주민등록번호 900101-1234567, 연락처 010-1234-5678, 상환 계좌 110-123-456789 입니다.",
+      "findings": [
+        {
+          "category": "RRN",
+          "start": 11,
+          "end": 25,
+          "value": "900101-1234567"
+        },
+        {
+          "category": "PHONE_NUMBER",
+          "start": 31,
+          "end": 44,
+          "value": "010-1234-5678"
+        },
+        {
+          "category": "ACCOUNT_NUMBER",
+          "start": 52,
+          "end": 66,
+          "value": "110-123-456789"
+        }
+      ],
+      "counts": {
+        "RRN": 1,
+        "ACCOUNT_NUMBER": 1,
+        "PHONE_NUMBER": 1,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "신청인 주민등록번호 [주민등록번호], 연락처 [전화번호], 상환 계좌 [계좌번호] 입니다."
+    },
+    {
+      "name": "emoji-before-phone",
+      "note": "A surrogate pair before the match: UTF-16 offsets differ from code points by one. Space-separated mobile number.",
+      "targetConsumerId": "CUST-1001",
+      "text": "확인 😀 연락 010 1234 5678 부탁",
+      "findings": [
+        {
+          "category": "PHONE_NUMBER",
+          "start": 9,
+          "end": 22,
+          "value": "010 1234 5678"
+        }
+      ],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 1,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "확인 😀 연락 [전화번호] 부탁"
+    },
+    {
+      "name": "rrn-without-hyphen-after-emoji",
+      "note": "Two surrogate pairs before the match; RRN without separator, born 2000 (7th digit 4).",
+      "targetConsumerId": "CUST-1001",
+      "text": "👍👍 등록번호 0001014123456 확인",
+      "findings": [
+        {
+          "category": "RRN",
+          "start": 10,
+          "end": 23,
+          "value": "0001014123456"
+        }
+      ],
+      "counts": {
+        "RRN": 1,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "👍👍 등록번호 [주민등록번호] 확인"
+    },
+    {
+      "name": "other-customer",
+      "note": "Another customer's identifier: the response policy blocks, so there is no masked text.",
+      "targetConsumerId": "CUST-1003",
+      "text": "비교 대상 고객 CUST-1001 의 기존 대출 이력 참고. 연락처 010-9876-5432",
+      "findings": [
+        {
+          "category": "OTHER_CUSTOMER",
+          "start": 9,
+          "end": 18,
+          "value": "CUST-1001"
+        },
+        {
+          "category": "PHONE_NUMBER",
+          "start": 38,
+          "end": 51,
+          "value": "010-9876-5432"
+        }
+      ],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 1,
+        "OTHER_CUSTOMER": 1
+      },
+      "masked": null
+    },
+    {
+      "name": "own-customer-id-is-not-a-finding",
+      "note": "The target customer's own identifier is not detected.",
+      "targetConsumerId": "CUST-1003",
+      "text": "대상 고객 CUST-1003 신청서 제출 완료",
+      "findings": [],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "대상 고객 CUST-1003 신청서 제출 완료"
+    },
+    {
+      "name": "overlap-is-masked-as-a-union",
+      "note": "Phone and account rules overlap; the union is one finding with the higher-priority category, so '-90' is not left visible.",
+      "targetConsumerId": "CUST-1001",
+      "text": "번호 010-1234-5678-90 확인",
+      "findings": [
+        {
+          "category": "PHONE_NUMBER",
+          "start": 3,
+          "end": 19,
+          "value": "010-1234-5678-90"
+        }
+      ],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 1,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "번호 [전화번호] 확인"
+    },
+    {
+      "name": "date-shape-is-not-an-account",
+      "note": "Date-shaped digit groups are excluded from the account rule.",
+      "targetConsumerId": "CUST-1001",
+      "text": "접수 번호 2026-10-07-1234 처리",
+      "findings": [],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "접수 번호 2026-10-07-1234 처리"
+    },
+    {
+      "name": "invalid-birth-date-is-not-an-rrn",
+      "note": "Month 13 is not a date, and two groups do not make an account number.",
+      "targetConsumerId": "CUST-1001",
+      "text": "참조 901301-1234567 기록",
+      "findings": [],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "참조 901301-1234567 기록"
+    },
+    {
+      "name": "letter-boundary",
+      "note": "A letter right before or right after breaks the match.",
+      "targetConsumerId": "CUST-1001",
+      "text": "코드 A900101-1234567 와 010-1234-5678x",
+      "findings": [],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "코드 A900101-1234567 와 010-1234-5678x"
+    },
+    {
+      "name": "clean",
+      "note": "Nothing to mask: the text is released as is.",
+      "targetConsumerId": "CUST-1002",
+      "text": "소득 증빙 서류 제출 완료. 심사 대기.",
+      "findings": [],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": "소득 증빙 서류 제출 완료. 심사 대기."
+    },
+    {
+      "name": "empty",
+      "note": "An empty document still goes through the detector.",
+      "targetConsumerId": "CUST-1002",
+      "text": "",
+      "findings": [],
+      "counts": {
+        "RRN": 0,
+        "ACCOUNT_NUMBER": 0,
+        "PHONE_NUMBER": 0,
+        "OTHER_CUSTOMER": 0
+      },
+      "masked": ""
+    }
+  ]
+}

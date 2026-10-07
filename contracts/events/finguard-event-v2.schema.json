@@ -237,6 +237,16 @@
                   "required": [
                     "resolvedAt"
                   ]
+                },
+                {
+                  "required": [
+                    "decisionStage"
+                  ]
+                },
+                {
+                  "required": [
+                    "responseScan"
+                  ]
                 }
               ]
             }
@@ -453,7 +463,8 @@
           "enum": [
             "ALLOW",
             "BLOCK",
-            "APPROVAL"
+            "APPROVAL",
+            "MASK"
           ]
         },
         "systemOutcome": {
@@ -489,6 +500,17 @@
         },
         "approvalRequestId": {
           "$ref": "#/$defs/nonEmptyIdentifier"
+        },
+        "decisionStage": {
+          "$comment": "Absent means REQUEST (decided before the call). RESPONSE: decided on the scanned response (stage 5).",
+          "type": "string",
+          "enum": [
+            "REQUEST",
+            "RESPONSE"
+          ]
+        },
+        "responseScan": {
+          "$ref": "#/$defs/responseScan"
         },
         "completedAt": {
           "$ref": "#/$defs/timestamp"
@@ -590,6 +612,109 @@
               }
             }
           }
+        },
+        {
+          "$comment": "APPROVAL is always decided before the call.",
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "APPROVAL"
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          },
+          "then": {
+            "not": {
+              "properties": {
+                "decisionStage": {
+                  "const": "RESPONSE"
+                }
+              },
+              "required": [
+                "decisionStage"
+              ]
+            }
+          }
+        },
+        {
+          "$comment": "A response-stage outcome always carries its decision (a call that failed before the policy is REQUEST).",
+          "if": {
+            "properties": {
+              "decisionStage": {
+                "const": "RESPONSE"
+              }
+            },
+            "required": [
+              "decisionStage"
+            ]
+          },
+          "then": {
+            "required": [
+              "decision"
+            ]
+          }
+        },
+        {
+          "$comment": "MASK released a masked response: response stage, completed, reasons and scan evidence.",
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "MASK"
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          },
+          "then": {
+            "required": [
+              "decisionStage",
+              "reasonCodes",
+              "responseScan"
+            ],
+            "properties": {
+              "decisionStage": {
+                "const": "RESPONSE"
+              },
+              "systemOutcome": {
+                "const": "COMPLETED"
+              },
+              "reasonCodes": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "$comment": "Scan evidence exists exactly when the response stage completed; a failed scan has no counts to trust.",
+          "if": {
+            "properties": {
+              "decisionStage": {
+                "const": "RESPONSE"
+              },
+              "systemOutcome": {
+                "const": "COMPLETED"
+              }
+            },
+            "required": [
+              "decisionStage",
+              "systemOutcome"
+            ]
+          },
+          "then": {
+            "required": [
+              "responseScan"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "responseScan"
+              ]
+            }
+          }
         }
       ],
       "dependentRequired": {
@@ -604,6 +729,55 @@
           "riskFlagged"
         ]
       }
+    },
+    "responseScan": {
+      "$comment": "Response-stage evidence (stage 5): category counts and the detector and response-policy versions only. Never the text, the matched values or their positions. The version patterns keep free text out of the audit record.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detectorVersion",
+        "policyVersion",
+        "counts"
+      ],
+      "properties": {
+        "detectorVersion": {
+          "type": "string",
+          "pattern": "^response-scan-[0-9]{1,4}$"
+        },
+        "policyVersion": {
+          "type": "string",
+          "pattern": "^response-policy-[0-9]{1,4}$"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "RRN",
+            "ACCOUNT_NUMBER",
+            "PHONE_NUMBER",
+            "OTHER_CUSTOMER"
+          ],
+          "properties": {
+            "RRN": {
+              "$ref": "#/$defs/findingCount"
+            },
+            "ACCOUNT_NUMBER": {
+              "$ref": "#/$defs/findingCount"
+            },
+            "PHONE_NUMBER": {
+              "$ref": "#/$defs/findingCount"
+            },
+            "OTHER_CUSTOMER": {
+              "$ref": "#/$defs/findingCount"
+            }
+          }
+        }
+      }
+    },
+    "findingCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 256
     },
     "approvalPayload": {
       "type": "object",

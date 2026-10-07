@@ -1,0 +1,28 @@
+{
+  "requestId": "REQ-501",
+  "decisionStage": "RESPONSE",
+  "systemOutcome": "COMPLETED",
+  "downstreamReached": true,
+  "completedAt": "2026-10-07T21:00:01+09:00",
+  "decision": "MASK",
+  "reasonCodes": [
+    "RRN_MASKED",
+    "PHONE_NUMBER_MASKED"
+  ],
+  "responseReleased": true,
+  "success": true,
+  "recordsRead": 1,
+  "latencyMs": 140,
+  "severity": "LOW",
+  "riskFlagged": false,
+  "responseScan": {
+    "detectorVersion": "response-scan-1",
+    "policyVersion": "response-policy-1",
+    "counts": {
+      "RRN": null,
+      "ACCOUNT_NUMBER": 0,
+      "PHONE_NUMBER": 2,
+      "OTHER_CUSTOMER": 0
+    }
+  }
+}

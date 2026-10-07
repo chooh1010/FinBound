@@ -492,3 +492,19 @@ ServiceAccount의 불필요한 Kubernetes API 접근도 거부한다.
 - [ ] ALLOW/BLOCK/ERROR Dashboard
 - [ ] Docker Compose E2E
 - [ ] Kubernetes 우회 방지는 P1로 설명
+
+---
+
+## 28. 응답 검사 / MASK (5단계)
+
+문서 Tool의 고정 문서로 응답 단계 판정을 재현한다(docs/04 §19). 모든 경우에 Agent 응답, 감사, 아웃박스·피드, Gateway·ai-risk·Core
+로그를 고정 문서의 원문 값으로 검색해 **0건**이어야 한다.
+
+| 시나리오 | 문서 | 기대 |
+|---|---|---|
+| `DOCUMENT_CLEAN` | 민감정보 없음 | ALLOW, `decisionStage=RESPONSE`, 원문 그대로, 건수 0 |
+| `DOCUMENT_WITH_PII` | 주민등록번호·계좌·전화 각 1 | MASK, 범주 표시로 바뀐 텍스트, 범주별 사유 3개, 건수 1·1·1 |
+| `DOCUMENT_OTHER_CUSTOMER` | 다른 고객 식별자 포함 | BLOCK `OTHER_CUSTOMER_DATA_IN_RESPONSE`, 결과 없음, `downstreamReached=true`, `responseReleased=false` |
+| 탐지기 정지 | 아무 문서 | ERROR `RESPONSE_SCAN_UNAVAILABLE` / `AI_RISK`, 결과 없음, `responseScan` 없음 |
+| 검사 스위치 꺼짐 | 아무 문서 | 호출 전 ERROR `RESPONSE_SCAN_DISABLED`, 금융 API 호출 0회 |
+| 숫자 Tool | — | 지금과 같음, 탐지기 호출 0회 |
