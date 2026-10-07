@@ -12,6 +12,9 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
+    // Kafka comparison experiment only (finbound-kafka-comparison-spec §8-§9); off unless switched on.
+    implementation("org.springframework.kafka:spring-kafka")
+    testImplementation("org.testcontainers:kafka")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
