@@ -21,6 +21,8 @@ finguard:
     block-threshold: ${ALERT_WORKER_BLOCK_THRESHOLD:5}
     risk-flag-threshold: ${ALERT_WORKER_RISK_FLAG_THRESHOLD:3}
     integrity-retries: ${ALERT_WORKER_INTEGRITY_RETRIES:5}
+    # 꽉 찬 묶음이면 간격을 기다리지 않고 바로 다시 읽는다. 끄면 처리 한계가 batch-size / poll-interval로 고정된다.
+    drain-when-full: ${ALERT_WORKER_DRAIN_WHEN_FULL:true}
 
 management:
   endpoints:
