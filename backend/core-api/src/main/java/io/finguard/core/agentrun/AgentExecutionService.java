@@ -17,6 +17,7 @@ import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.ApprovalStatus;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
+import io.finguard.core.domain.DecisionStage;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.repository.AgentRunRepository;
 import io.finguard.core.repository.ApprovalRequestRepository;
@@ -121,7 +122,9 @@ public class AgentExecutionService {
                 event.getErrorLocation(),
                 event.getRequestedAt(),
                 event.getCompletedAt(),
-                event.getApprovalRequestId());
+                event.getApprovalRequestId(),
+                event.getDecisionStage() == DecisionStage.RESPONSE ? DecisionStage.RESPONSE : null,
+                event.getResponseScan() == null ? null : event.getResponseScan().toContract());
     }
 
 }

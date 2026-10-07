@@ -36,10 +36,17 @@ const decisionLabels = {
   ALLOW: '정상 처리',
   BLOCK: '차단',
   APPROVAL: '승인 필요',
+  MASK: '가림',
   ERROR: '오류',
   PROCESSING: '처리 중',
   OUTCOME_UNKNOWN: '결과 미확인',
   UNKNOWN: '확인 불가',
+}
+const responseScanCategoryLabels = {
+  RRN: '주민등록번호',
+  ACCOUNT_NUMBER: '계좌번호',
+  PHONE_NUMBER: '전화번호',
+  OTHER_CUSTOMER: '다른 고객 정보',
 }
 const severityLabels = { LOW: '일반', MEDIUM: '관찰', HIGH: '주의', CRITICAL: '긴급' }
 const riskLevelLabels = { LOW: '낮음', ALERT: '주의', CRITICAL: '높음' }
@@ -65,11 +72,13 @@ const toolLabels = {
   CREDIT_SCORE_READ: '신용정보 확인',
   INCOME_READ: '소득자료 확인',
   DEBT_READ: '부채자료 확인',
+  LOAN_APPLICATION_READ: '대출신청서 확인',
 }
 const dataLabels = {
   CREDIT_SCORE: '신용정보',
   INCOME: '소득자료',
   DEBT: '부채자료',
+  LOAN_APPLICATION: '대출신청서',
 }
 const errorLocationLabels = {
   CORE: '업무 관리 시스템',
@@ -141,6 +150,15 @@ const responseStatusLabel = (event) => {
   if (event.responseReleased === false) return '제공 안 함'
   return event.auditStatus === 'PROCESSING' ? '확인 중' : '확인 불가'
 }
+// 응답 검사(docs/04 §19)는 decisionStage가 RESPONSE일 때만 있다. 문서 원문은 API에 없으므로 건수만 보인다.
+const isResponseStageEvent = (event) => event?.decisionStage === 'RESPONSE'
+const responseScanCategoryRows = (event) => (
+  Object.entries(responseScanCategoryLabels).map(([category, label]) => ({
+    category,
+    label,
+    count: event.responseScan?.counts?.[category] ?? 0,
+  }))
+)
 
 async function loadEvents() {
   dashboardLoading.value = true
@@ -241,6 +259,7 @@ watch(page, () => {
         <article class="metric-protected"><span class="metric-icon" aria-hidden="true"><svg class="soft-shield-icon" viewBox="0 0 24 24"><path class="shield-fill" d="M12 2.7c2.35 1.45 4.75 2.35 7.2 2.9v5.15c0 4.75-2.8 8.4-7.2 10.55-4.4-2.15-7.2-5.8-7.2-10.55V5.6c2.45-.55 4.85-1.45 7.2-2.9Z" /><path class="shield-symbol" d="M9 9l6 6M15 9l-6 6" /></svg></span><div><span>안전 차단</span><strong class="metric-block">{{ summaryMetric('block') }}</strong><small>금융시스템 조회 전 중단</small></div></article>
         <article class="metric-warning"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 21 20H3L12 3Z" /><path d="M12 9v5M12 17h.01" /></svg></span><div><span>처리 오류</span><strong class="metric-error">{{ summaryMetric('error') }}</strong><small>확인 또는 재처리 필요</small></div></article>
         <article class="metric-warning metric-approval"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" /></svg></span><div><span>승인 필요</span><strong class="metric-error">{{ summaryMetric('approval') }}</strong><small>담당자 확인 전 실행 보류</small></div></article>
+        <article class="metric-warning metric-mask"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" /><path d="M5 5l14 14" /></svg></span><div><span>가림 제공</span><strong class="metric-error">{{ summaryMetric('mask') }}</strong><small>개인정보를 가리고 제공</small></div></article>
         <article class="metric-warning metric-outcome-unknown"><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4M12 17h.01" /></svg></span><div><span>결과 미확인</span><strong class="metric-error">{{ summaryMetric('outcomeUnknown') }}</strong><small>결과 기록 누락 확인 필요</small></div></article>
       </div>
 
@@ -267,6 +286,7 @@ watch(page, () => {
             <option value="ALLOW">정상 처리</option>
             <option value="BLOCK">차단</option>
             <option value="APPROVAL">승인 필요</option>
+            <option value="MASK">가림</option>
             <option value="ERROR">오류</option>
           </select>
         </label>
@@ -337,6 +357,19 @@ watch(page, () => {
           <p>처리 사유</p>
           <strong>{{ describeAuditReason(selectedEvent) }}</strong>
           <details><summary>시스템 처리 코드 보기</summary><small>{{ reasonCodeLabel(selectedEvent) }} · {{ selectedEvent.auditEventId }} · {{ selectedEvent.requestedTool }}</small></details>
+        </div>
+        <div v-if="isResponseStageEvent(selectedEvent)" class="detail-section response-scan-section">
+          <p>응답 검사</p>
+          <small>조회를 마친 응답에서 개인정보로 보이는 부분을 검사한 결과입니다. 원문 내용은 기록하지 않습니다.</small>
+          <dl class="response-scan-counts">
+            <div v-for="row in responseScanCategoryRows(selectedEvent)" :key="row.category">
+              <dt>{{ row.label }}</dt><dd>{{ row.count }}건</dd>
+            </div>
+          </dl>
+          <dl class="response-scan-versions">
+            <div><dt>탐지기 버전</dt><dd>{{ selectedEvent.responseScan?.detectorVersion || '미제공' }}</dd></div>
+            <div><dt>응답 정책 버전</dt><dd>{{ selectedEvent.responseScan?.policyVersion || '미제공' }}</dd></div>
+          </dl>
         </div>
         <dl class="execution-state">
           <div><dt>금융시스템 요청</dt><dd>{{ downstreamStatusLabel(selectedEvent) }}</dd></div>

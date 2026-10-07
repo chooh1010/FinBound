@@ -211,6 +211,8 @@ Viewer는 Dashboard와 같은 읽기 전용 범위에서 전체 실행을 조회
 }
 ```
 
+- 응답 단계 시도(§19)에는 `decisionStage: "RESPONSE"`와 `responseScan`(범주별 건수·버전)이 붙는다. 호출 전 시도에는 둘 다
+  없다. 문서 원문은 이 응답에도 없다.
 - `status`는 `RUNNING | COMPLETED | FAILED` 중 하나다. 저장소의 실행 준비 상태 `CREATED`는
   Public 응답에서 `RUNNING`으로 표현한다.
 - `FAILED`는 AuditEvent가 없어도 반환한다. Core가 Agent를 호출하지 못한 실패를 화면에서

@@ -11,6 +11,7 @@ export const EXECUTION_TOOL_LABELS = {
   CREDIT_SCORE_READ: '신용정보 확인',
   INCOME_READ: '소득자료 확인',
   DEBT_READ: '부채자료 확인',
+  LOAN_APPLICATION_READ: '대출신청서 확인',
 }
 
 const initialMode = import.meta.env.VITE_FINBOUND_API_MODE === 'real' ? 'real' : 'mock'
@@ -162,6 +163,9 @@ export function mapAuditEvent(raw) {
     requestedData: raw.requestedData ?? [],
     reasonCodes: raw.reasonCodes ?? [],
     scopeStatus: mapScopeStatus(raw.scopeStatus),
+    // decisionStage가 없으면 호출 전 판정이다(docs/04 §19.1).
+    decisionStage: raw.decisionStage ?? 'REQUEST',
+    responseScan: raw.responseScan ?? null,
   }
 }
 
@@ -187,7 +191,12 @@ function mapPermissionSummary(permission) {
 
 function executionDescription(attempt) {
   if (attempt.systemOutcome === 'ERROR') return '업무 시스템 처리 중 오류가 발생해 결과를 제공하지 못했습니다.'
-  if (attempt.decision === 'BLOCK') return '현재 업무 범위를 벗어난 요청으로 금융시스템 조회 전에 차단했습니다.'
+  if (attempt.decision === 'MASK') return '금융시스템 조회는 완료했지만 응답에서 개인정보로 보이는 부분을 가리고 제공했습니다.'
+  if (attempt.decision === 'BLOCK') {
+    // 응답 검사 단계 BLOCK은 조회 자체는 끝났고, 결과에 다른 고객 정보가 있어 제공하지 않은 경우다(docs/04 §19.1).
+    if (attempt.decisionStage === 'RESPONSE') return '금융시스템 조회는 완료했지만 응답에 다른 고객 정보가 있어 결과를 제공하지 않았습니다.'
+    return '현재 업무 범위를 벗어난 요청으로 금융시스템 조회 전에 차단했습니다.'
+  }
   if (attempt.decision === 'ALLOW' && attempt.systemOutcome === 'COMPLETED') return '현재 업무 범위 안에서 자료 확인을 완료했습니다.'
   if (attempt.decision === 'APPROVAL') return '정책이 담당자 확인을 요구해 금융시스템을 조회하지 않았습니다. 승인되면 같은 요청을 다시 실행할 수 있습니다.'
   return '실행 결과의 상세 설명이 제공되지 않았습니다.'
@@ -207,6 +216,9 @@ function mapExecutionAttempt(raw = {}) {
     scopeStatus: mapScopeStatus(raw.scopeStatus),
     // 승인을 써서 판정한 시도만 갖는다(docs/04 §3).
     approvalRequestId: typeof raw.approvalRequestId === 'string' ? raw.approvalRequestId : null,
+    // decisionStage가 없으면 호출 전 판정이다. responseScan은 응답 검사 단계에서만 온다(docs/04 §19.1).
+    decisionStage: raw.decisionStage ?? 'REQUEST',
+    responseScan: raw.responseScan ?? null,
     tool,
     label: EXECUTION_TOOL_LABELS[tool] ?? tool,
   }
@@ -345,13 +357,56 @@ function validateExecution(execution, agentRunId) {
  * ERROR 절은 success 를 필수로 요구하고 BLOCK 절은 success 의 존재 자체를 금지한다
  * (execution-outcome.schema.json 의 두 조건부 절). 어느 값을 넣어도 통과하지 못한다.
  */
+const VALID_DECISION_STAGES = new Set(['REQUEST', 'RESPONSE'])
+const RESPONSE_SCAN_CATEGORIES = ['RRN', 'ACCOUNT_NUMBER', 'PHONE_NUMBER', 'OTHER_CUSTOMER']
+const RESPONSE_SCAN_KEYS = ['detectorVersion', 'policyVersion', 'counts']
+const RESPONSE_SCAN_DETECTOR_VERSION_PATTERN = /^response-scan-\d{1,4}$/
+const RESPONSE_SCAN_POLICY_VERSION_PATTERN = /^response-policy-\d{1,4}$/
+
+/**
+ * responseScan은 응답 검사 단계에서만 오고, 올 때는 범주 네 개의 건수와 두 버전을 모두 갖는다(docs/04 §19.1, §19.4).
+ * 없는 것은 허용하되(호출 전 판정·검사 실패는 금지), 오는 값의 모양은 서버 DB 제약과 같은 수준으로 확인한다.
+ */
+function isValidResponseScan(responseScan) {
+  if (responseScan === undefined || responseScan === null) return true
+  if (typeof responseScan !== 'object' || Array.isArray(responseScan)) return false
+  if (Object.keys(responseScan).length !== RESPONSE_SCAN_KEYS.length) return false
+  if (typeof responseScan.detectorVersion !== 'string' || !RESPONSE_SCAN_DETECTOR_VERSION_PATTERN.test(responseScan.detectorVersion)) return false
+  if (typeof responseScan.policyVersion !== 'string' || !RESPONSE_SCAN_POLICY_VERSION_PATTERN.test(responseScan.policyVersion)) return false
+  const counts = responseScan.counts
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) return false
+  if (Object.keys(counts).length !== RESPONSE_SCAN_CATEGORIES.length) return false
+  return RESPONSE_SCAN_CATEGORIES.every((category) => (
+    Number.isInteger(counts[category]) && counts[category] >= 0 && counts[category] <= 256
+  ))
+}
+
+/**
+ * decisionStage·systemOutcome·responseScan의 존재 여부는 docs/04 §19.1 상태 표가 고정한 조합만 허용한다.
+ * responseScan은 완료된 응답 단계에만 있고, 그 밖의 모든 경우(호출 전 판정·시스템 오류·검사 실패)에는 없어야 한다.
+ */
+function isValidDecisionStageShape(attempt) {
+  const stage = attempt.decisionStage ?? 'REQUEST'
+  const hasResponseScan = attempt.responseScan !== undefined && attempt.responseScan !== null
+  if (attempt.systemOutcome === 'ERROR') return !hasResponseScan
+  if (stage === 'RESPONSE') return hasResponseScan
+  return !hasResponseScan
+}
+
 function isContractualAttempt(attempt) {
   if (!['COMPLETED', 'ERROR'].includes(attempt?.systemOutcome)) return false
+  if (attempt.decisionStage !== undefined && !VALID_DECISION_STAGES.has(attempt.decisionStage)) return false
+  if (!isValidResponseScan(attempt.responseScan)) return false
+  if (!isValidDecisionStageShape(attempt)) return false
   if (attempt.systemOutcome === 'ERROR') {
     return attempt.decision === undefined || attempt.decision === 'ALLOW'
   }
+  // APPROVAL은 언제나 호출 전 판정이다(docs/04 §19.1). MASK는 응답 검사가 개인정보를 가리고 내보낸,
+  // 응답 단계에서만 나는 판정이다.
+  if (attempt.decision === 'APPROVAL') return attempt.decisionStage === undefined || attempt.decisionStage === 'REQUEST'
+  if (attempt.decision === 'MASK') return attempt.decisionStage === 'RESPONSE'
   // APPROVAL도 BLOCK처럼 실행하지 않은 판정이다. COMPLETED로 확정되고 사람의 확인을 기다린다(docs/06 §11).
-  return ['ALLOW', 'BLOCK', 'APPROVAL'].includes(attempt.decision)
+  return ['ALLOW', 'BLOCK'].includes(attempt.decision)
 }
 
 async function getAgentExecution(agentRunId) {
@@ -379,6 +434,7 @@ function mapAgentExecution(agentRun, permission, execution) {
   const allowedCount = attempts.filter((attempt) => attempt.decision === 'ALLOW' && attempt.systemOutcome !== 'ERROR').length
   const blockedCount = attempts.filter((attempt) => attempt.decision === 'BLOCK').length
   const approvalCount = attempts.filter((attempt) => attempt.decision === 'APPROVAL').length
+  const maskedCount = attempts.filter((attempt) => attempt.decision === 'MASK').length
   const status = execution.status === 'FAILED' ? 'ERROR' : execution.status
   const errorCount = Math.max(
     attempts.filter((attempt) => attempt.systemOutcome === 'ERROR').length,
@@ -471,6 +527,7 @@ function mapAgentExecution(agentRun, permission, execution) {
       `안전 차단 ${blockedCount}건`,
       // 판정 기록의 수다. 지금도 기다리는지는 승인 요청 상태가 말한다(approvals).
       ...(approvalCount ? [`승인 필요 판정 ${approvalCount}건`] : []),
+      ...(maskedCount ? [`개인정보 가림 제공 ${maskedCount}건`] : []),
       `처리 오류 ${errorCount}건`,
       ...outcome.extraItems,
     ],
@@ -530,6 +587,7 @@ const mockApi = {
       allow: events.filter((event) => eventOutcome(event) === 'ALLOW').length,
       block: events.filter((event) => eventOutcome(event) === 'BLOCK').length,
       approval: events.filter((event) => eventOutcome(event) === 'APPROVAL').length,
+      mask: events.filter((event) => eventOutcome(event) === 'MASK').length,
       error: events.filter((event) => eventOutcome(event) === 'ERROR').length,
       outcomeUnknown: events.filter((event) => event.auditStatus === 'OUTCOME_UNKNOWN').length,
     }
