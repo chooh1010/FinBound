@@ -173,6 +173,53 @@ test_detector_version_not_a_string_has_no_decision if {
     not response.decision with input as request
 }
 
+# --- requestId / tool / 최상위 키 모양이 틀리면 판정을 만들지 않는다 ---
+
+test_missing_request_id_has_no_decision if {
+    request := object.remove(base_input, {"requestId"})
+    not response.decision with input as request
+}
+
+test_null_request_id_has_no_decision if {
+    request := object.union(base_input, {"requestId": null})
+    not response.decision with input as request
+}
+
+test_non_string_request_id_has_no_decision if {
+    request := object.union(base_input, {"requestId": 1})
+    not response.decision with input as request
+}
+
+test_empty_request_id_has_no_decision if {
+    request := object.union(base_input, {"requestId": ""})
+    not response.decision with input as request
+}
+
+test_missing_tool_has_no_decision if {
+    request := object.remove(base_input, {"tool"})
+    not response.decision with input as request
+}
+
+test_null_tool_has_no_decision if {
+    request := object.union(base_input, {"tool": null})
+    not response.decision with input as request
+}
+
+test_non_string_tool_has_no_decision if {
+    request := object.union(base_input, {"tool": 1})
+    not response.decision with input as request
+}
+
+test_empty_tool_has_no_decision if {
+    request := object.union(base_input, {"tool": ""})
+    not response.decision with input as request
+}
+
+test_extra_top_level_key_has_no_decision if {
+    request := object.union(base_input, {"extra": "nope"})
+    not response.decision with input as request
+}
+
 # 판정은 셋 중 정확히 하나다. 규칙이 겹치면 이 평가 자체가 충돌 오류로 실패한다.
 test_decisions_are_exclusive_and_exhaustive_for_valid_input if {
     every rrn in [0, 1] {

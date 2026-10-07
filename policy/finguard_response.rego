@@ -27,11 +27,33 @@ valid_detector_version if {
     regex.match(detector_version_pattern, input.detectorVersion)
 }
 
-# 건수와 탐지기 버전 모양이 정해진 계약을 지킬 때만 입력을 신뢰한다(docs/04 §19.3).
-# 원문·탐지 값은 입력에 없으므로 여기서 볼 것도 막을 것도 아니다 — 건수만 본다.
+valid_request_id if {
+    is_string(input.requestId)
+    input.requestId != ""
+}
+
+valid_tool if {
+    is_string(input.tool)
+    input.tool != ""
+}
+
+# 최상위 키가 정확히 이 네 개뿐이어야 한다. 하나라도 더 있으면(오타 키, 호출부 버그로
+# 섞여 든 필드 등) 호출부 통합 오류를 숨기지 않고 판정을 만들지 않는다(docs/04 §19.3).
+expected_top_level_keys := {"requestId", "tool", "counts", "detectorVersion"}
+
+valid_top_level_shape if {
+    is_object(input)
+    object.keys(input) == expected_top_level_keys
+}
+
+# 건수·탐지기 버전·요청 id·tool 모양이 정해진 계약을 지킬 때만 입력을 신뢰한다(docs/04 §19.3).
+# 원문·탐지 값은 입력에 없으므로 여기서 볼 것도 막을 것도 아니다.
 valid_input if {
+    valid_top_level_shape
     valid_counts
     valid_detector_version
+    valid_request_id
+    valid_tool
 }
 
 mask_reasons contains "RRN_MASKED" if { input.counts.RRN > 0 }

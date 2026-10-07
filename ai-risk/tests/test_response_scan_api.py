@@ -194,6 +194,89 @@ def test_own_target_customer_id_is_not_flagged() -> None:
     assert response.json()["findings"] == []
 
 
+def test_account_trailing_group_does_not_suppress_the_valid_account_within_it() -> None:
+    # Regression: a greedy fixed-group pattern consumed "110-123-456789-123456" as one
+    # candidate and rejected it outright (digit total 21), hiding the valid 3-group
+    # account ("110-123-456789") inside it, with zero findings. The whole run must now
+    # be masked instead.
+    text = "계좌 110-123-456789-123456 확인"
+    response = _post(text)
+
+    assert response.status_code == 200
+    findings = response.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["category"] == "ACCOUNT_NUMBER"
+    assert _slice_utf16(text, findings[0]["start"], findings[0]["end"]) == "110-123-456789-123456"
+
+
+def test_account_leading_groups_do_not_suppress_an_embedded_account() -> None:
+    # Same regression, with the extra groups prepended instead of appended.
+    text = "계좌 123456-123456-110-123-456789 확인"
+    response = _post(text)
+
+    assert response.status_code == 200
+    findings = response.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["category"] == "ACCOUNT_NUMBER"
+    assert (
+        _slice_utf16(text, findings[0]["start"], findings[0]["end"])
+        == "123456-123456-110-123-456789"
+    )
+
+
+def test_account_five_group_run_with_a_qualifying_window_is_detected() -> None:
+    # Neither end of this run qualifies on its own ("99-88-123" is 7 digits total,
+    # "123-456789-11" is 20); only the middle window ("88-123-456789", 11 digits)
+    # does, and that is enough to mask the whole run.
+    text = "계좌 99-88-123-456789-11 확인"
+    response = _post(text)
+
+    assert response.status_code == 200
+    findings = response.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["category"] == "ACCOUNT_NUMBER"
+    assert _slice_utf16(text, findings[0]["start"], findings[0]["end"]) == "99-88-123-456789-11"
+
+
+def test_account_accepts_a_single_digit_first_group() -> None:
+    # SPEC §19.2 places no per-group digit limit; a 1-digit group is still a group.
+    text = "계좌 1-2345-678901 확인"
+    response = _post(text)
+
+    assert response.status_code == 200
+    findings = response.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["category"] == "ACCOUNT_NUMBER"
+    assert _slice_utf16(text, findings[0]["start"], findings[0]["end"]) == "1-2345-678901"
+
+
+def test_mobile_phone_with_mixed_separators_is_detected() -> None:
+    for text in ("연락처 010-1234.5678 확인", "연락처 010 1234-5678 확인"):
+        response = _post(text)
+
+        assert response.status_code == 200
+        findings = response.json()["findings"]
+        assert len(findings) == 1
+        assert findings[0]["category"] == "PHONE_NUMBER"
+
+
+def test_phone_overlapping_a_longer_account_run_is_one_merged_phone_finding() -> None:
+    # The mobile pattern only reaches "010-1234-5678"; the account rule's run extends
+    # two more groups to the right ("-90-12"). The merged finding must still carry the
+    # higher-priority PHONE_NUMBER category but cover the entire account run, so none
+    # of "-90-12" is left unmasked.
+    text = "번호 010-1234-5678-90-12 확인"
+    response = _post(text)
+
+    assert response.status_code == 200
+    findings = response.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["category"] == "PHONE_NUMBER"
+    assert (
+        _slice_utf16(text, findings[0]["start"], findings[0]["end"]) == "010-1234-5678-90-12"
+    )
+
+
 def test_empty_text_is_a_normal_request_with_zero_findings() -> None:
     response = _post("")
 
@@ -284,6 +367,32 @@ def test_response_scan_rejects_unknown_field() -> None:
 def test_response_scan_rejects_non_string_text() -> None:
     payload = _payload("정상 입력")
     payload["text"] = 12345
+
+    response = client.post(
+        "/internal/v1/risk/response-scan", json=payload, headers=INTERNAL_HEADERS
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "REQUEST_VALIDATION_FAILED"}
+
+
+def test_response_scan_rejects_request_id_with_whitespace() -> None:
+    # A request id with embedded whitespace/newlines would otherwise reach the log
+    # line verbatim (SPEC §19.2 logs requestId), opening a log-injection channel.
+    payload = _payload("정상 입력")
+    payload["requestId"] = "req 1"
+
+    response = client.post(
+        "/internal/v1/risk/response-scan", json=payload, headers=INTERNAL_HEADERS
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "REQUEST_VALIDATION_FAILED"}
+
+
+def test_response_scan_rejects_request_id_with_newline() -> None:
+    payload = _payload("정상 입력")
+    payload["requestId"] = "req-1\nforged-entry"
 
     response = client.post(
         "/internal/v1/risk/response-scan", json=payload, headers=INTERNAL_HEADERS
@@ -386,9 +495,18 @@ def test_response_scan_fails_closed_when_findings_exceed_the_cap(
 
 
 def test_other_customer_outranks_phone_number_in_a_merge() -> None:
-    text = "CUST-1001 연락처 010-1234-5678 CUST-1001"
-    response = _post(text, target_consumer_id="CUST-1002", request_id="REQ-priority")
+    # Regression: the previous version of this text put the customer id and the phone
+    # number in separate, non-overlapping spots, so it could not have caught a broken
+    # merge even if one existed. Here the customer id's digits run directly into a
+    # dash-joined chain that is itself both a phone and an account candidate, so all
+    # three raw spans truly overlap, and the merge must still pick OTHER_CUSTOMER.
+    text = "고객 CUST-0101-1234-5678 확인"
+    response = _post(text, target_consumer_id="CUST-9999", request_id="REQ-priority")
 
     assert response.status_code == 200
-    categories = {finding["category"] for finding in response.json()["findings"]}
-    assert "OTHER_CUSTOMER" in categories
+    findings = response.json()["findings"]
+    assert len(findings) == 1
+    assert findings[0]["category"] == "OTHER_CUSTOMER"
+    assert (
+        _slice_utf16(text, findings[0]["start"], findings[0]["end"]) == "CUST-0101-1234-5678"
+    )

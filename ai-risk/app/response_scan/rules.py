@@ -26,37 +26,38 @@ _RRN_PATTERN = re.compile(
     rf"{_NOT_BEFORE_ALNUM}(\d{{6}})([- ]?)(\d{{7}}){_NOT_AFTER_ALNUM}", re.ASCII
 )
 
-# Mobile: 01[016789], groups joined by '-', '.', a single space, or no separator at all.
-# The same separator is used for both gaps; spec gives no evidence that mixing them
-# (e.g. "010-1234.5678") is an intended format, and no real phone number is written
-# that way.
+# Mobile: 01[016789], each separator position independently '-', '.', a single space,
+# or (mobile only) no separator at all. The two gaps are independent character classes,
+# so mixed pairings like "010-1234.5678" or "010 1234-5678" match (SPEC §19.2 lists
+# permitted separators without requiring both gaps to match).
 _MOBILE_PATTERN = re.compile(
     rf"{_NOT_BEFORE_ALNUM}01[016789]"
-    rf"(?:-\d{{3,4}}-\d{{4}}|\.\d{{3,4}}\.\d{{4}}| \d{{3,4}} \d{{4}}|\d{{3,4}}\d{{4}})"
+    rf"(?:[-. ]\d{{3,4}}[-. ]\d{{4}}|\d{{7,8}})"
     rf"{_NOT_AFTER_ALNUM}",
     re.ASCII,
 )
 
-# Landline: 0[2-6][0-9]?, a separator is required (no bare-digit variant).
+# Landline: 0[2-6][0-9]?, a separator is required at each gap (no bare-digit variant),
+# but the two gaps may differ.
 _LANDLINE_PATTERN = re.compile(
-    rf"{_NOT_BEFORE_ALNUM}0[2-6][0-9]?"
-    rf"(?:-\d{{3,4}}-\d{{4}}|\.\d{{3,4}}\.\d{{4}}| \d{{3,4}} \d{{4}})"
-    rf"{_NOT_AFTER_ALNUM}",
+    rf"{_NOT_BEFORE_ALNUM}0[2-6][0-9]?[-. ]\d{{3,4}}[-. ]\d{{4}}{_NOT_AFTER_ALNUM}",
     re.ASCII,
 )
 
-# Account: 3-4 digit groups (2-6 digits each) joined by '-'. Range and the
-# date-shape exclusion are applied after the match (see _is_valid_account).
-# Known limitation (documented in SPEC §19.2 and docs/04 §19.2): because `finditer`
-# does not backtrack across a failed candidate, a long chain of 5+ dash-joined groups
-# (e.g. "1234-5678-90-123456") can be rejected as a whole even though a 3-4 group
-# window inside it would individually satisfy the digit-count rule. This matches the
-# spec's framing of the account rule as conservative and not a precise identifier,
-# and is not covered by the shared fixtures.
-_ACCOUNT_PATTERN = re.compile(
-    rf"{_NOT_BEFORE_ALNUM}\d{{2,6}}-\d{{2,6}}-\d{{2,6}}(?:-\d{{2,6}})?{_NOT_AFTER_ALNUM}",
-    re.ASCII,
+# Account: maximal runs of dash-joined ASCII digit groups (SPEC §19.2: groups of any
+# length, no per-group digit limit). `finditer` on this pattern cannot backtrack across
+# a rejected candidate the way a fixed 3-4 group pattern could, because there is no
+# alternative here to reject: every maximal run is found exactly once, and the
+# multi-group windows inside it are then checked in Python (see _account_run_span).
+# Digit and '-' are disjoint character classes, so this match is linear, not subject to
+# catastrophic backtracking.
+_DIGIT_DASH_RUN_PATTERN = re.compile(r"[0-9]+(?:-[0-9]+)*", re.ASCII)
+
+_ASCII_ALNUM = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
+
+_ACCOUNT_WINDOW_SIZES = (3, 4)
 
 _OTHER_CUSTOMER_PATTERN = re.compile(
     rf"{_NOT_BEFORE_ALNUM}CUST-\d{{4}}{_NOT_AFTER_ALNUM}", re.ASCII
@@ -152,18 +153,46 @@ def _find_phone_spans(text: str) -> list[tuple[int, int, ResponseScanCategory]]:
     return spans
 
 
-def _is_valid_account(matched_text: str) -> bool:
-    if _DATE_SHAPE_PREFIX.match(matched_text):
+def _has_alnum_run_boundary(text: str, start: int, end: int) -> bool:
+    """True if the character immediately before `start` or at `end` is an ASCII
+    letter or digit (SPEC §19.2 "경계"), mirroring the lookaround the other rules
+    apply inline in their compiled patterns."""
+    if start > 0 and text[start - 1] in _ASCII_ALNUM:
+        return True
+    if end < len(text) and text[end] in _ASCII_ALNUM:
+        return True
+    return False
+
+
+def _account_run_qualifies(run_text: str) -> bool:
+    """True if any window of 3-4 consecutive dash-joined groups in this run has a
+    total digit count in [10, 14], and the run does not start with the date shape
+    (SPEC §19.2). A qualifying run is masked in full (see module docstring for why
+    this cannot be narrowed to the window without leaving the rest of the run, which
+    is still a dash-joined digit chain, visible)."""
+    if _DATE_SHAPE_PREFIX.match(run_text):
         return False
-    digit_count = sum(character.isdigit() for character in matched_text)
-    return _ACCOUNT_MIN_DIGITS <= digit_count <= _ACCOUNT_MAX_DIGITS
+    group_lengths = [len(group) for group in run_text.split("-")]
+    group_count = len(group_lengths)
+    for window_size in _ACCOUNT_WINDOW_SIZES:
+        if window_size > group_count:
+            continue
+        for window_start in range(group_count - window_size + 1):
+            window_end = window_start + window_size
+            total_digits = sum(group_lengths[window_start:window_end])
+            if _ACCOUNT_MIN_DIGITS <= total_digits <= _ACCOUNT_MAX_DIGITS:
+                return True
+    return False
 
 
 def _find_account_spans(text: str) -> list[tuple[int, int, ResponseScanCategory]]:
     spans: list[tuple[int, int, ResponseScanCategory]] = []
-    for match in _ACCOUNT_PATTERN.finditer(text):
-        if _is_valid_account(match.group()):
-            spans.append((match.start(), match.end(), ResponseScanCategory.ACCOUNT_NUMBER))
+    for match in _DIGIT_DASH_RUN_PATTERN.finditer(text):
+        start, end = match.start(), match.end()
+        if _has_alnum_run_boundary(text, start, end):
+            continue
+        if _account_run_qualifies(match.group()):
+            spans.append((start, end, ResponseScanCategory.ACCOUNT_NUMBER))
     return spans
 
 

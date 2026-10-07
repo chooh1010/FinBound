@@ -15,7 +15,9 @@ class ResponseScanCategory(StrEnum):
 
 
 class ResponseScanRequest(ContractModel):
-    request_id: str = Field(min_length=1, max_length=128)
+    # No whitespace/newlines allowed: a request id is logged verbatim (SPEC §19.2), so an
+    # unrestricted string would let an attacker-controlled id inject log lines (log injection).
+    request_id: str = Field(pattern=r"^[A-Za-z0-9._:-]{1,128}$")
     tool: FinancialTool
     target_consumer_id: str = Field(min_length=1, max_length=128)
     # Size (16 KiB UTF-8) is checked after parsing so the failure maps to 413, not the
