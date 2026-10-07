@@ -22,6 +22,7 @@ import io.finguard.gateway.exception.CoreUnavailableException;
 import io.finguard.gateway.exception.OpaUnavailableException;
 import io.finguard.gateway.exception.PromptRiskUnavailableException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.finguard.gateway.metrics.PhaseTimer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,6 +39,7 @@ public class AuthorizationService {
     private final AiClient aiClient;
     private final OpaClient opaClient;
     private final HardLimitService hardLimitService;
+    private final PhaseTimer phases;
 
     public AuthorizationOutcome decide(VerifiedAgentIdentity identity,
                                        ToolCallRequest request,
@@ -45,19 +47,21 @@ public class AuthorizationService {
                                        String traceparent,
                                        Instant requestedAt) {
         try {
-            ResolvedContext resolvedContext = coreClient.resolveContext(identity, request, requestId, traceparent);
+            ResolvedContext resolvedContext =
+                phases.time("context", () -> coreClient.resolveContext(identity, request, requestId, traceparent));
             PromptRiskSnapshot promptRisk = requireEvaluatedPromptRisk(
                 resolvedContext.promptRiskSnapshot());
-            BehaviorHistory history = coreClient.behaviorHistory(identity, "5m", requestId, traceparent);
-            BehaviorRiskResult behavior = aiClient.evaluateBehavior(
-                identity, request, resolvedContext, history, requestId, traceparent, requestedAt);
+            BehaviorHistory history =
+                phases.time("history", () -> coreClient.behaviorHistory(identity, "5m", requestId, traceparent));
+            BehaviorRiskResult behavior = phases.time("behavior", () -> aiClient.evaluateBehavior(
+                identity, request, resolvedContext, history, requestId, traceparent, requestedAt));
             AuthorizationContext context = new AuthorizationContext(
                 requestId,
                 resolvedContext.scopeStatus(),
                 riskInput(promptRisk, behavior),
                 new HardLimits(hardLimitService.isExceeded(identity.agentId())),
                 new AuthorizationContext.ApprovalInput(resolvedContext.approvalGranted()));
-            PolicyDecisionResult decision = opaClient.decide(context);
+            PolicyDecisionResult decision = phases.time("policy", () -> opaClient.decide(context));
             return new AuthorizationOutcome(decision, behavior.behaviorRisk(), PolicyInputSnapshot.from(context));
         } catch (CoreUnavailableException e) {
             return failClosed("CONTEXT_SERVICE_UNAVAILABLE", requestId, e);
