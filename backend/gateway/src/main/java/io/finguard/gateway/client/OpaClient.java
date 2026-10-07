@@ -3,6 +3,7 @@ package io.finguard.gateway.client;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -46,8 +47,8 @@ public class OpaClient {
                 throw new OpaUnavailableException("OPA returned a non-ALLOW decision without reasons");
             }
             return result;
-        } catch (RestClientException e) {
-            throw new OpaUnavailableException("OPA call failed", e);
+        } catch (RestClientException | InvalidMediaTypeException e) {
+            throw new OpaUnavailableException("OPA call failed", HttpFailures.sanitized(e));
         }
     }
 

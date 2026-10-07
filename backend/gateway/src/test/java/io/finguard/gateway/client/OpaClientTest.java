@@ -116,4 +116,24 @@ class OpaClientTest {
         server.stubFor(post(urlEqualTo("/v1/data/finguard/authorization/decision"))
             .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody(body)));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "500|{\"message\":\"LEAKMARKER900101\"}",
+        "200|{\"result\":{\"decision\":\"LEAKMARKER900101\"}}",
+        "200|{\"result\":{\"decision\":\"ALLOW\",\"riskFlagged\":\"LEAKMARKER900101\"}}",
+        "200|{}|LEAKMARKER900101"
+    })
+    void failuresDoNotCarryTheResponseBody(String statusAndBody) {
+        String[] parts = statusAndBody.split("[|]", 3);
+        String contentType = parts.length == 3 ? parts[2] : "application/json";
+        server.stubFor(post(urlEqualTo("/v1/data/finguard/authorization/decision"))
+            .willReturn(aResponse().withStatus(Integer.parseInt(parts[0]))
+                .withHeader("Content-Type", contentType).withBody(parts[1])));
+
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> client.decide(CONTEXT));
+
+        assertThat(failure).isInstanceOf(OpaUnavailableException.class);
+        assertThat(MockFinanceClientLeakTest.rendered(failure)).doesNotContain("LEAKMARKER900101");
+    }
 }

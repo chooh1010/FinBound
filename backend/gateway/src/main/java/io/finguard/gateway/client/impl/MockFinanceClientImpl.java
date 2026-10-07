@@ -9,7 +9,9 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -17,6 +19,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import io.finguard.gateway.client.DownstreamClient;
+import io.finguard.gateway.client.HttpFailures;
 import io.finguard.gateway.dto.DownstreamToolResult;
 import io.finguard.gateway.dto.ToolCallRequest;
 import io.finguard.gateway.exception.DownstreamTimeoutException;
@@ -66,16 +69,24 @@ public class MockFinanceClientImpl implements DownstreamClient {
             return response;
         } catch (ResourceAccessException e) {
             if (isReadTimeout(e)) {
-                throw new DownstreamTimeoutException("Mock finance API timed out", e);
+                throw new DownstreamTimeoutException("Mock finance API timed out", HttpFailures.sanitized(e));
             }
             if (isConnectFailure(e)) {
-                throw new DownstreamUnavailableException("Mock finance API connection failed", e, false);
+                throw new DownstreamUnavailableException("Mock finance API connection failed",
+                    HttpFailures.sanitized(e), false);
             }
-            throw new DownstreamUnavailableException("Mock finance API call failed", e, false);
+            throw new DownstreamUnavailableException("Mock finance API call failed", HttpFailures.sanitized(e), false);
         } catch (RestClientResponseException e) {
-            throw new DownstreamUnavailableException("Mock finance API returned error status", e, true);
+            throw new DownstreamUnavailableException("Mock finance API returned error status",
+                HttpFailures.sanitized(e), true);
+        } catch (InvalidMediaTypeException e) {
+            // 응답 헤더를 받았으므로 도달했다.
+            throw new DownstreamUnavailableException("Mock finance API returned an invalid content type",
+                HttpFailures.sanitized(e), true);
         } catch (RestClientException e) {
-            throw new DownstreamUnavailableException("Mock finance API call failed", e, false);
+            // 응답 본문을 해석하지 못한 것은 응답을 받은 뒤의 실패다 — 도달했다.
+            throw new DownstreamUnavailableException("Mock finance API call failed", HttpFailures.sanitized(e),
+                e.getCause() instanceof HttpMessageNotReadableException);
         }
     }
 

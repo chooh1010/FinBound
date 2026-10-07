@@ -21,6 +21,7 @@ import io.finguard.gateway.authorization.AuthorizationOutcome;
 import io.finguard.gateway.authorization.AuthorizationService;
 import io.finguard.gateway.client.CoreClient;
 import io.finguard.gateway.client.DownstreamClient;
+import io.finguard.gateway.client.HttpFailures;
 import io.finguard.gateway.contract.PolicyDecision;
 import io.finguard.gateway.dto.AuditOutcome;
 import io.finguard.gateway.dto.AuditStart;
@@ -335,12 +336,11 @@ public class ToolCallEnforcementService {
         }
     }
 
-    // 예외 객체를 통째로 로그에 넘기지 않는다. HTTP 오류 예외의 메시지에는 Core 응답 본문이 실릴 수 있다
-    // (AGENTS.md — 원본 payload를 로그에 남기지 않는다). 상태 코드와 예외 종류만 남긴다.
+    // 예외 종류와 상태 코드만 남긴다. HTTP 원인은 클라이언트가 이미 그 모양으로 바꿔 둔다(HttpFailures).
     private static String describe(RuntimeException failure) {
         Throwable cause = failure.getCause() == null ? failure : failure.getCause();
-        if (cause instanceof org.springframework.web.client.HttpStatusCodeException http) {
-            return http.getClass().getSimpleName() + " status=" + http.getStatusCode().value();
+        if (cause instanceof HttpFailures.SanitizedHttpFailure sanitized) {
+            return sanitized.getMessage();
         }
         return cause.getClass().getSimpleName();
     }

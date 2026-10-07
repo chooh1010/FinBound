@@ -302,4 +302,46 @@ class CoreClientImplTest {
             Instant.now(),
             null);
     }
+
+    // 다섯 호출 모두: 오류 응답 본문, 해석할 수 없는 본문, 잘못된 Content-Type에 실린 원문이 예외 체인에 남지 않는다.
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = {
+        "resolve|500|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "resolve|200|application/json|{\"requestId\":\"LEAKMARKER900101",
+        "resolve|200|LEAKMARKER900101|{}",
+        "create|409|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "create|500|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "outcome|400|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "outcome|409|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "outcome|503|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "history|500|application/json|{\"detail\":\"LEAKMARKER900101\"}",
+        "history|200|application/json|{\"agentId\":[\"LEAKMARKER900101\"]}",
+        "history|200|LEAKMARKER900101|{}",
+        "authFailure|500|application/json|{\"detail\":\"LEAKMARKER900101\"}"
+    })
+    void failuresDoNotCarryTheResponseBody(String call, int status, String contentType, String body) {
+        com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder response =
+            aResponse().withStatus(status).withHeader("Content-Type", contentType).withBody(body);
+        server.stubFor(com.github.tomakehurst.wiremock.client.WireMock.any(
+            com.github.tomakehurst.wiremock.client.WireMock.anyUrl()).willReturn(response));
+        AuditStart auditStart = new AuditStart(
+            "REQ-1", "trace", "RUN-001", "LOAN-AGENT-01", null,
+            "CUST-1001", FinancialTool.CREDIT_SCORE_READ, "PROCESSING", Instant.now());
+
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> {
+            switch (call) {
+                case "resolve" -> client.resolveContext(identity, request, "550e8400-e29b-41d4-a716-446655440000",
+                    "trace");
+                case "create" -> client.createAudit(identity, auditStart, "trace");
+                case "outcome" -> client.updateAuditOutcome(identity, "REQ-1", minimalOutcome(), "trace");
+                case "history" -> client.behaviorHistory(identity, "5m", "REQ-1", "trace");
+                default -> client.recordAuthFailure("REQ-401", "trace", "AGENT_AUTHENTICATION_FAILED");
+            }
+        });
+
+        assertThat(server.getAllServeEvents()).hasSize(1);
+        assertThat(failure).isNotNull();
+        assertThat(failure.getCause()).isInstanceOf(HttpFailures.SanitizedHttpFailure.class);
+        assertThat(MockFinanceClientLeakTest.rendered(failure)).doesNotContain("LEAKMARKER900101");
+    }
 }
