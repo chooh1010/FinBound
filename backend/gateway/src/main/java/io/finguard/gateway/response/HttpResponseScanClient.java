@@ -32,7 +32,8 @@ public class HttpResponseScanClient implements ResponseScanClient {
     private final String internalCredential;
     private final Duration timeout;
 
-    public HttpResponseScanClient(@Value("${finguard.ai.base-url}") String baseUrl,
+    // 탐지기 주소는 따로 둘 수 있다(기본은 ai-risk). 행동 위험과 응답 검사의 장애를 따로 다룰 수 있게 한다.
+    public HttpResponseScanClient(@Value("${finguard.response-scan.base-url:${finguard.ai.base-url}}") String baseUrl,
                                   @Value("${finguard.credentials.internal-service}") String internalCredential,
                                   @Value("${finguard.timeouts.ai-ms}") long timeoutMs) {
         this.timeout = Duration.ofMillis(timeoutMs);

@@ -393,20 +393,56 @@ function isValidDecisionStageShape(attempt) {
   return !hasResponseScan
 }
 
+/**
+ * decisionStage가 전혀 없는 레거시 응답(§19.1 상태 표가 생기기 전의 감사 기록)은 판정 enum만
+ * 확인한다. downstreamReached·responseReleased가 없거나 서로 모순돼도 거부하지 않는다 —
+ * 그 시절에는 이 표의 조합 규칙 자체가 없었다.
+ */
+function isValidLegacyDecision(attempt) {
+  if (attempt.systemOutcome === 'ERROR') {
+    return attempt.decision === undefined || attempt.decision === 'ALLOW'
+  }
+  // APPROVAL도 BLOCK처럼 실행하지 않은 판정이다. COMPLETED로 확정되고 사람의 확인을 기다린다(docs/06 §11).
+  return ['ALLOW', 'BLOCK', 'APPROVAL'].includes(attempt.decision)
+}
+
+/**
+ * decisionStage가 명시된 응답은 docs/04 §19.1 상태 표의 행 하나와 정확히 일치해야 한다.
+ * decision·systemOutcome·downstreamReached·responseReleased 조합이 표를 벗어나면(예: RESPONSE
+ * 단계인데 판정이 없다, MASK인데 응답을 내보내지 않았다, BLOCK인데 응답을 내보냈다) 거부한다.
+ */
+function isValidStateTableRow(attempt) {
+  const { decision, decisionStage, systemOutcome, downstreamReached, responseReleased } = attempt
+
+  if (decisionStage === 'REQUEST') {
+    if (systemOutcome === 'COMPLETED') {
+      // 호출 전 BLOCK·APPROVAL
+      return ['BLOCK', 'APPROVAL'].includes(decision) && downstreamReached === false && responseReleased === false
+    }
+    // 검사 스위치 꺼짐(판정 없음) 또는 하위 호출 실패(ALLOW) — 둘 다 응답은 내보내지 않았다
+    return (decision === undefined || decision === 'ALLOW') && responseReleased === false
+  }
+
+  // decisionStage === 'RESPONSE' — 응답 검사 단계는 반드시 판정과 하위 도달이 있다
+  if (decision === undefined || downstreamReached !== true) return false
+  if (systemOutcome === 'ERROR') {
+    // 검사 실패·시간 초과: 조회는 됐지만 결과는 내보내지 않았다
+    return decision === 'ALLOW' && responseReleased === false
+  }
+  // systemOutcome === 'COMPLETED'
+  if (decision === 'ALLOW' || decision === 'MASK') return responseReleased === true
+  if (decision === 'BLOCK') return responseReleased === false
+  // APPROVAL 등 응답 단계에 있을 수 없는 판정
+  return false
+}
+
 function isContractualAttempt(attempt) {
   if (!['COMPLETED', 'ERROR'].includes(attempt?.systemOutcome)) return false
   if (attempt.decisionStage !== undefined && !VALID_DECISION_STAGES.has(attempt.decisionStage)) return false
   if (!isValidResponseScan(attempt.responseScan)) return false
   if (!isValidDecisionStageShape(attempt)) return false
-  if (attempt.systemOutcome === 'ERROR') {
-    return attempt.decision === undefined || attempt.decision === 'ALLOW'
-  }
-  // APPROVAL은 언제나 호출 전 판정이다(docs/04 §19.1). MASK는 응답 검사가 개인정보를 가리고 내보낸,
-  // 응답 단계에서만 나는 판정이다.
-  if (attempt.decision === 'APPROVAL') return attempt.decisionStage === undefined || attempt.decisionStage === 'REQUEST'
-  if (attempt.decision === 'MASK') return attempt.decisionStage === 'RESPONSE'
-  // APPROVAL도 BLOCK처럼 실행하지 않은 판정이다. COMPLETED로 확정되고 사람의 확인을 기다린다(docs/06 §11).
-  return ['ALLOW', 'BLOCK'].includes(attempt.decision)
+  if (attempt.decisionStage === undefined) return isValidLegacyDecision(attempt)
+  return isValidStateTableRow(attempt)
 }
 
 async function getAgentExecution(agentRunId) {

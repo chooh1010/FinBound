@@ -152,6 +152,9 @@ const responseStatusLabel = (event) => {
 }
 // 응답 검사(docs/04 §19)는 decisionStage가 RESPONSE일 때만 있다. 문서 원문은 API에 없으므로 건수만 보인다.
 const isResponseStageEvent = (event) => event?.decisionStage === 'RESPONSE'
+// 검사 실패·시간 초과(§19.1)는 RESPONSE 단계이지만 responseScan이 없다. 믿을 수 있는 건수가 없으므로
+// 0건으로 보이면 안 되고, 검사가 끝나지 않았다는 사실을 보여야 한다.
+const hasResponseScanEvidence = (event) => Boolean(event?.responseScan)
 const responseScanCategoryRows = (event) => (
   Object.entries(responseScanCategoryLabels).map(([category, label]) => ({
     category,
@@ -361,15 +364,18 @@ watch(page, () => {
         <div v-if="isResponseStageEvent(selectedEvent)" class="detail-section response-scan-section">
           <p>응답 검사</p>
           <small>조회를 마친 응답에서 개인정보로 보이는 부분을 검사한 결과입니다. 원문 내용은 기록하지 않습니다.</small>
-          <dl class="response-scan-counts">
-            <div v-for="row in responseScanCategoryRows(selectedEvent)" :key="row.category">
-              <dt>{{ row.label }}</dt><dd>{{ row.count }}건</dd>
-            </div>
-          </dl>
-          <dl class="response-scan-versions">
-            <div><dt>탐지기 버전</dt><dd>{{ selectedEvent.responseScan?.detectorVersion || '미제공' }}</dd></div>
-            <div><dt>응답 정책 버전</dt><dd>{{ selectedEvent.responseScan?.policyVersion || '미제공' }}</dd></div>
-          </dl>
+          <p v-if="!hasResponseScanEvidence(selectedEvent)" class="response-scan-unavailable">검사 미완료 — 결과를 내보내지 않음</p>
+          <template v-else>
+            <dl class="response-scan-counts">
+              <div v-for="row in responseScanCategoryRows(selectedEvent)" :key="row.category">
+                <dt>{{ row.label }}</dt><dd>{{ row.count }}건</dd>
+              </div>
+            </dl>
+            <dl class="response-scan-versions">
+              <div><dt>탐지기 버전</dt><dd>{{ selectedEvent.responseScan?.detectorVersion || '미제공' }}</dd></div>
+              <div><dt>응답 정책 버전</dt><dd>{{ selectedEvent.responseScan?.policyVersion || '미제공' }}</dd></div>
+            </dl>
+          </template>
         </div>
         <dl class="execution-state">
           <div><dt>금융시스템 요청</dt><dd>{{ downstreamStatusLabel(selectedEvent) }}</dd></div>

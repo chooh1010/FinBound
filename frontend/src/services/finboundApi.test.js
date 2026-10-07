@@ -708,6 +708,113 @@ describe('real Core API adapter', () => {
     })
   })
 
+  const RESPONSE_SCAN = {
+    detectorVersion: 'response-scan-1',
+    policyVersion: 'response-policy-1',
+    counts: { RRN: 1, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 },
+  }
+
+  it.each([
+    ['a RESPONSE/ERROR attempt that claims a released response', {
+      decision: 'ALLOW',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'ERROR',
+      downstreamReached: true,
+      responseReleased: true,
+    }],
+    ['a RESPONSE/ERROR attempt with no decision at all', {
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'ERROR',
+      downstreamReached: true,
+      responseReleased: false,
+    }],
+    ['a RESPONSE/MASK attempt that was not released', {
+      decision: 'MASK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: true,
+      responseReleased: false,
+      responseScan: RESPONSE_SCAN,
+    }],
+    ['a RESPONSE/MASK attempt that never reached the downstream tool', {
+      decision: 'MASK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: false,
+      responseReleased: true,
+      responseScan: RESPONSE_SCAN,
+    }],
+    ['a RESPONSE/BLOCK attempt that claims a released response', {
+      decision: 'BLOCK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: true,
+      responseReleased: true,
+      responseScan: RESPONSE_SCAN,
+    }],
+    ['a RESPONSE/BLOCK attempt that never reached the downstream tool', {
+      decision: 'BLOCK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: false,
+      responseReleased: false,
+      responseScan: RESPONSE_SCAN,
+    }],
+  ])('rejects a contradictory response-stage state table combination: %s', async (_label, shape) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-STATE-TABLE', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-STATE-TABLE',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-STATE-TABLE',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          reasonCodes: ['RRN_MASKED'],
+          ...shape,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  it('accepts a response-stage scan failure as completed with no released result', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-SCAN-FAILED', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-SCAN-FAILED',
+        status: 'FAILED',
+        attempts: [{
+          requestId: 'REQ-SCAN-FAILED',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          decision: 'ALLOW',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'ERROR',
+          reasonCodes: ['RESPONSE_SCAN_UNAVAILABLE'],
+          downstreamReached: true,
+          responseReleased: false,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.attempts).toHaveLength(1)
+    expect(result.attempts[0].decisionStage).toBe('RESPONSE')
+    expect(result.attempts[0].systemOutcome).toBe('ERROR')
+    expect(result.attempts[0].responseReleased).toBe(false)
+  })
+
   it('rejects a response-scan object carrying an extra field', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-EXTRA-FIELD', status: 'RUNNING' }))

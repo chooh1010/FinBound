@@ -668,6 +668,50 @@ describe('FinBound P0 application', () => {
     expect(detail.text()).not.toContain('차단')
   })
 
+  it('shows a failed response-scan as incomplete instead of zero counts', async () => {
+    // RESPONSE/ERROR(검사 실패·시간 초과)는 responseScan이 없다(docs/04 §19.1). 믿을 수 있는
+    // 건수가 없으므로 범주별 0건을 보이면 안 되고, 검사가 끝나지 않았다는 사실을 보여야 한다.
+    const scanFailed = mapAuditEvent({
+      auditEventId: 'AUD-SCAN-FAILED',
+      requestId: 'REQ-SCAN-FAILED',
+      agentId: 'LOAN-AGENT-01',
+      agentRunId: 'RUN-SCAN-FAILED',
+      caseId: 'LOAN-2026-001',
+      targetConsumerId: 'CUST-1001',
+      requestedTool: 'LOAN_APPLICATION_READ',
+      requestedData: ['LOAN_APPLICATION'],
+      status: 'ERROR',
+      systemOutcome: 'ERROR',
+      decision: 'ALLOW',
+      decisionStage: 'RESPONSE',
+      reasonCodes: ['RESPONSE_SCAN_UNAVAILABLE'],
+      downstreamReached: true,
+      responseReleased: false,
+      requestedAt: '2026-09-03T10:00:00+09:00',
+    })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, mask: 0, error: 1, outcomeUnknown: 0 })
+    vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
+      items: [scanFailed],
+      page: 1,
+      pageSize: 5,
+      totalItems: 1,
+      totalPages: 1,
+      filterOptions: { agentIds: [], caseIds: [], consumerIds: [], tools: [], reasonCodes: [] },
+    })
+    vi.spyOn(finboundApi, 'getAuditEvent').mockResolvedValue(scanFailed)
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-screen="dashboard"]').trigger('click')
+    await flushPromises()
+
+    const detail = wrapper.get('.event-detail')
+    expect(detail.text()).toContain('응답 검사')
+    expect(detail.text()).toContain('검사 미완료')
+    expect(detail.find('.response-scan-counts').exists()).toBe(false)
+    expect(detail.text()).not.toContain('주민등록번호')
+    expect(detail.text()).not.toContain('0건')
+  })
+
   it('does not render a response-scan section for a request-stage audit record', async () => {
     const normal = mapAuditEvent({
       auditEventId: 'AUD-NORMAL',
