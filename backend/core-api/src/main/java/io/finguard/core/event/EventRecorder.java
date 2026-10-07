@@ -18,6 +18,7 @@ import io.finguard.core.domain.ApprovalRequest;
 import io.finguard.core.domain.ApprovalRequestEvent;
 import io.finguard.core.domain.AuditEvent;
 import io.finguard.core.domain.AuditStatus;
+import io.finguard.core.domain.DecisionStage;
 
 /**
  * 이벤트 v2를 아웃박스에 남긴다. docs/04 §18. 아웃박스에 쓰는 유일한 곳이다.
@@ -119,6 +120,12 @@ public class EventRecorder {
             putIfPresent(payload, "policyVersion", event.getPolicyVersion());
         }
         putIfPresent(payload, "approvalRequestId", event.getApprovalRequestId());
+        // 호출 전 단계는 생략과 같다(docs/04 §19.1). 5단계 이전과 같은 이벤트를 내도록 응답 단계만 적는다.
+        if (type != EventType.TOOL_CALL_OUTCOME_UNKNOWN && event.getDecisionStage() == DecisionStage.RESPONSE) {
+            payload.put("decisionStage", DecisionStage.RESPONSE.name());
+            putIfPresent(payload, "responseScan",
+                    event.getResponseScan() == null ? null : event.getResponseScan().toContract());
+        }
         if (type != EventType.TOOL_CALL_OUTCOME_UNKNOWN) {
             payload.put("completedAt", event.getCompletedAt().toString());
         }

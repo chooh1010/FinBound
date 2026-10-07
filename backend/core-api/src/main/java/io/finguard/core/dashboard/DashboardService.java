@@ -42,8 +42,9 @@ public class DashboardService {
         long allow = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.ALLOW);
         long block = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.BLOCK);
         long approval = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.APPROVAL);
+        long mask = auditEvents.countByStatusNotAndDecision(AuditStatus.ERROR, PolicyDecision.MASK);
         long outcomeUnknown = auditEvents.countByStatus(AuditStatus.OUTCOME_UNKNOWN);
-        return new DashboardSummaryResponse(total, allow, block, approval, error, outcomeUnknown);
+        return new DashboardSummaryResponse(total, allow, block, approval, mask, error, outcomeUnknown);
     }
 
     public AuditEventPageResponse findEvents(AuditEventQuery query, int page, int pageSize) {
@@ -126,6 +127,7 @@ public class DashboardService {
         ALLOW,
         BLOCK,
         APPROVAL,
+        MASK,
         ERROR;
 
         Specification<AuditEvent> toSpecification() {
@@ -134,6 +136,7 @@ public class DashboardService {
                 case ALLOW -> PolicyDecision.ALLOW;
                 case BLOCK -> PolicyDecision.BLOCK;
                 case APPROVAL -> PolicyDecision.APPROVAL;
+                case MASK -> PolicyDecision.MASK;
                 case ERROR -> null;
             };
             if (decision == null) {

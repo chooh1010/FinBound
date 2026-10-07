@@ -1277,7 +1277,8 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 
 Vue는 PostgreSQL을 직접 조회하지 않는다.
 
-`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `approval`, `error`, `outcomeUnknown`을 반환한다.
+`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `approval`, `mask`, `error`, `outcomeUnknown`을
+반환한다. `block`에는 호출 후 BLOCK도 들어간다(§19.1). 목록 필터 `outcome`은 `MASK`도 받는다.
 `total`은 나머지의 합과 같지 않을 수 있다 — 진행 중인 `PROCESSING`은 `total`에만 들어간다.
 `outcomeUnknown`은 판정이 없으므로 `allow`·`block`에 넣지 않는다.
 
@@ -1451,6 +1452,8 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
   표를 따른다.
 - 이벤트 v2는 이 표 가운데 `decision`·`systemOutcome`·`reasonCodes`·`decisionStage`·`responseScan`만 싣는다(도달·공개·측정값
   열은 이벤트에 없다).
+- Core는 검사 증거를 jsonb가 아닌 칸 여섯 개(두 버전, 네 건수)로 저장하고, 버전 모양·건수 범위·위 표의 행을 DB
+  제약으로도 막는다(V14).
 - 행동 이력(§9)으로 내보낼 때 MASK는 ALLOW로, 응답 단계 BLOCK은 실행 측정값(`success`·`latencyMs`) 없는 BLOCK으로
   바꿔 보낸다. 행동 위험 계약(§10)은 그대로다.
 - 최종 판정은 하나다. `reasonCodes`는 두 단계 사유의 합집합, `severity`는 더 높은 쪽, `riskFlagged`는 OR이다. `policyVersion`은

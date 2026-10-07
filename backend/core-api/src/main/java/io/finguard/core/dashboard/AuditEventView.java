@@ -2,6 +2,7 @@ package io.finguard.core.dashboard;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -11,6 +12,7 @@ import io.finguard.core.domain.AuditScopeStatus;
 import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.BehaviorRiskLevel;
 import io.finguard.core.domain.DataType;
+import io.finguard.core.domain.DecisionStage;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.PromptRiskEvaluationStatus;
 import io.finguard.core.domain.PromptRiskLevel;
@@ -68,6 +70,8 @@ public record AuditEventView(
         Integer recordsRead,
         Long latencyMs,
         String errorLocation,
+        DecisionStage decisionStage,
+        Map<String, Object> responseScan,
         AuditStatus status,
         Instant requestedAt,
         Instant completedAt,
@@ -112,6 +116,9 @@ public record AuditEventView(
                 notExecuted(event) ? null : event.getRecordsRead(),
                 notExecuted(event) ? null : event.getLatencyMs(),
                 event.getErrorLocation(),
+                // 호출 전 단계는 생략과 같다. 진행 중·결과 모름 행은 계약이 단계를 금지한다 — 응답 단계만 적는다.
+                event.getDecisionStage() == DecisionStage.RESPONSE ? DecisionStage.RESPONSE : null,
+                event.getResponseScan() == null ? null : event.getResponseScan().toContract(),
                 event.getStatus(),
                 event.getRequestedAt(),
                 event.getCompletedAt(),
@@ -141,7 +148,9 @@ public record AuditEventView(
      * 쌓인 기록에는 값이 남아 있을 수 있고, 화면에 나가는 순간 그것도 계약 위반이다.
      */
     private static boolean notExecuted(AuditEvent event) {
-        return event.getDecision() != null && !event.getDecision().runsTool();
+        // 호출 후 BLOCK은 실행했다. 그 측정값은 계약이 요구한다(docs/04 §19.1).
+        return event.getDecision() != null && !event.getDecision().runsTool()
+                && event.getDecisionStage() != DecisionStage.RESPONSE;
     }
 
     /**

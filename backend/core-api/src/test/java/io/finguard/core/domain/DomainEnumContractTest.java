@@ -69,9 +69,12 @@ class DomainEnumContractTest {
     @Test
     void policyDecisionHasNoErrorValue() {
         // docs/06 §11 — 시스템 장애는 Decision Enum이 아니라 Audit 상태로 표현한다.
-        assertThat(PolicyDecision.values()).extracting(Enum::name).containsExactly("ALLOW", "BLOCK", "APPROVAL");
-        // 실행하는 판정은 ALLOW 하나뿐이다. 새 판정이 실행 여부를 정하지 않은 채 들어오지 못하게 고정한다.
-        assertThat(PolicyDecision.values()).filteredOn(PolicyDecision::runsTool).containsExactly(PolicyDecision.ALLOW);
+        assertThat(PolicyDecision.values()).extracting(Enum::name)
+                .containsExactly("ALLOW", "BLOCK", "APPROVAL", "MASK");
+        // 실행하는 판정은 ALLOW와 MASK다(MASK는 실행한 응답을 가려 내보냈다). 새 판정이 실행 여부를 정하지 않은 채
+        // 들어오지 못하게 고정한다. 호출 후 BLOCK의 실행 여부는 판정이 아니라 단계가 정한다(docs/04 §19.1).
+        assertThat(PolicyDecision.values()).filteredOn(PolicyDecision::runsTool)
+                .containsExactly(PolicyDecision.ALLOW, PolicyDecision.MASK);
     }
 
     @Test

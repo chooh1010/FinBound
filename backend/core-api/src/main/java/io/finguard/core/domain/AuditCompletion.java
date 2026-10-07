@@ -20,7 +20,31 @@ public record AuditCompletion(
         Boolean riskFlagged,
         String policyVersion,
         Instant completedAt,
-        PolicyInput policyInput) {
+        PolicyInput policyInput,
+        DecisionStage decisionStage,
+        ResponseScan responseScan) {
+
+    /** 호출 전 단계의 결과(5단계 이전의 모양). */
+    public AuditCompletion(
+            PolicyDecision decision,
+            AuditStatus systemOutcome,
+            Set<String> reasonCodes,
+            boolean downstreamReached,
+            boolean responseReleased,
+            Boolean success,
+            Integer recordsRead,
+            Long latencyMs,
+            String errorLocation,
+            BigDecimal behaviorRisk,
+            Severity severity,
+            Boolean riskFlagged,
+            String policyVersion,
+            Instant completedAt,
+            PolicyInput policyInput) {
+        this(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success, recordsRead,
+                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt, policyInput,
+                DecisionStage.REQUEST, null);
+    }
 
     /** 판정 입력 스냅샷이 없는 결과(fail-closed, 판정 입력을 보내지 않던 Gateway). */
     public AuditCompletion(
@@ -39,10 +63,12 @@ public record AuditCompletion(
             String policyVersion,
             Instant completedAt) {
         this(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success, recordsRead,
-                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt, null);
+                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt,
+                (PolicyInput) null);
     }
 
     public AuditCompletion {
+        decisionStage = decisionStage == null ? DecisionStage.REQUEST : decisionStage;
         // OUTCOME_UNKNOWN은 결과가 아니라 결과 부재다. 결과 적용 경로로 들어오면 안 된다.
         if (systemOutcome == null || !systemOutcome.isOutcomeInput()) {
             throw new IllegalArgumentException("Audit completion requires a final system outcome");
@@ -52,8 +78,9 @@ public record AuditCompletion(
         }
         // contracts/audit/execution-outcome.schema.json:48-104의 조건부 불변식.
         // 이걸 걸지 않으면 스키마가 금지한 상태가 감사 기록으로 남는다 — 거짓 증거가 된다.
-        // BLOCK과 APPROVAL은 Tool을 실행하지 않은 판정이다. 같은 규칙을 따른다.
-        if (decision != null && !decision.runsTool()) {
+        // 호출 전 BLOCK과 APPROVAL은 Tool을 실행하지 않은 판정이다. 같은 규칙을 따른다. 호출 후 BLOCK은 아래 응답 단계
+        // 규칙을 따른다(docs/04 §19.1).
+        if (decision != null && !decision.runsTool() && decisionStage == DecisionStage.REQUEST) {
             if (downstreamReached) {
                 throw new IllegalArgumentException("A decision that did not run the tool cannot reach downstream");
             }
@@ -86,7 +113,9 @@ public record AuditCompletion(
                         "Error outcome requires at least one reason code");
             }
         }
-        if (decision == PolicyDecision.ALLOW && systemOutcome == AuditStatus.COMPLETED) {
+        ResponseStageRules.check(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success,
+                recordsRead, latencyMs, errorLocation, decisionStage, responseScan);
+        if (decision != null && decision.runsTool() && systemOutcome == AuditStatus.COMPLETED) {
             if (!Boolean.TRUE.equals(success)) {
                 throw new IllegalArgumentException("Allowed completion must report success");
             }
