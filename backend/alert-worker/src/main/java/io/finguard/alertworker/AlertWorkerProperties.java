@@ -10,6 +10,7 @@ import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 
 /**
@@ -27,6 +28,8 @@ import jakarta.validation.constraints.Positive;
  * @param integrityRetries 같은 위치에서 무결성 실패가 이만큼 이어지면 멈추고 사건으로 남긴다
  * @param drainWhenFull 받은 묶음이 꽉 찼으면 간격을 기다리지 않고 바로 다시 읽는다. 끄면 언제나 간격을 기다린다 — 그러면 처리
  *     한계가 {@code batchSize / pollInterval}로 고정된다
+ * @param source 이벤트 출처. {@code feed}(기본) 또는 {@code kafka}. 그 밖의 값이면 기동하지 않는다 — 오타로 두 출처가 모두
+ *     꺼진 채 UP으로 보이지 않게
  */
 @Validated
 @ConfigurationProperties(prefix = "finguard.alert-worker")
@@ -40,7 +43,8 @@ public record AlertWorkerProperties(
         @DefaultValue("5") @Positive int blockThreshold,
         @DefaultValue("3") @Positive int riskFlagThreshold,
         @DefaultValue("5") @Positive int integrityRetries,
-        @DefaultValue("true") boolean drainWhenFull) {
+        @DefaultValue("true") boolean drainWhenFull,
+        @DefaultValue("feed") @NotNull @Pattern(regexp = "feed|kafka") String source) {
 
     @AssertTrue(message = "poll-interval and window must be positive")
     public boolean hasPositiveDurations() {

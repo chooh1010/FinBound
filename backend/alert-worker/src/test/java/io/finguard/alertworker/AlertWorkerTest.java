@@ -344,7 +344,8 @@ class AlertWorkerTest {
             add(toolCall("TOOL_CALL_FINALIZED", "BLOCK", false, "2026-10-07T12:00:" + (10 + i) + "Z"));
         }
         serve();
-        AlertWorker other = new AlertWorker(feedClient, rules, properties, jdbc, transactionManager,
+        AlertWorker other = new AlertWorker(feedClient,
+                new EventProcessing(jdbc, rules, new SimpleMeterRegistry()), properties, jdbc, transactionManager,
                 new SimpleMeterRegistry());
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
@@ -373,7 +374,8 @@ class AlertWorkerTest {
         assertThat(jdbc.queryForObject("select after_seq from checkpoints", Long.class)).isEqualTo(3);
 
         // 새 프로세스와 같다 — 메모리 상태 없이 저장된 체크포인트만 이어받는다.
-        AlertWorker restarted = new AlertWorker(feedClient, rules, properties, jdbc, transactionManager,
+        AlertWorker restarted = new AlertWorker(feedClient,
+                new EventProcessing(jdbc, rules, new SimpleMeterRegistry()), properties, jdbc, transactionManager,
                 new SimpleMeterRegistry());
         for (int i = 0; i < 5; i++) {
             restarted.runOnce();
@@ -474,7 +476,7 @@ class AlertWorkerTest {
         }
     }
 
-    private static String toolCall(String type, String decision, Boolean riskFlagged, String occurredAt)
+    static String toolCall(String type, String decision, Boolean riskFlagged, String occurredAt)
             throws Exception {
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("auditEventId", "AUD-" + UUID.randomUUID());

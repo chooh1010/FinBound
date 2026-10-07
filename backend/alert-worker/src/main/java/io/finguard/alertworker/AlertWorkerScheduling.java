@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
@@ -15,8 +15,9 @@ import org.springframework.stereotype.Component;
  * 늘리되 30초를 넘기지 않는다 — 피드가 내려가 있는 동안 두드리기만 하지 않게.
  */
 @Component
-@ConditionalOnProperty(prefix = "finguard.alert-worker", name = "polling-enabled", havingValue = "true",
-        matchIfMissing = true)
+// 출처가 피드일 때만 돈다(기본). Kafka 출처면 KafkaSourceConfiguration이 대신 받는다.
+@ConditionalOnExpression("${finguard.alert-worker.polling-enabled:true}"
+        + " and '${finguard.alert-worker.source:feed}' == 'feed'")
 class AlertWorkerScheduling implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(AlertWorkerScheduling.class);

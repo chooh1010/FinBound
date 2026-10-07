@@ -23,6 +23,12 @@ finguard:
     integrity-retries: ${ALERT_WORKER_INTEGRITY_RETRIES:5}
     # 꽉 찬 묶음이면 간격을 기다리지 않고 바로 다시 읽는다. 끄면 처리 한계가 batch-size / poll-interval로 고정된다.
     drain-when-full: ${ALERT_WORKER_DRAIN_WHEN_FULL:true}
+    # 이벤트 출처. feed(기본) 또는 kafka(비교 실험, finbound-kafka-comparison-spec §9).
+    source: ${ALERT_WORKER_SOURCE:feed}
+    kafka:
+      bootstrap-servers: ${ALERT_WORKER_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      topic: ${ALERT_WORKER_KAFKA_TOPIC:finguard.events.v2}
+      group-id: ${ALERT_WORKER_KAFKA_GROUP_ID:alert-worker}
 
 management:
   endpoints:

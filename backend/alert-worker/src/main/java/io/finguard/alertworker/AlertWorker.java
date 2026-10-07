@@ -1,10 +1,7 @@
 package io.finguard.alertworker;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
@@ -21,7 +18,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 
 /**
  * 피드를 한 번 읽어 처리한다. docs/04 §18.
@@ -43,15 +39,12 @@ public class AlertWorker {
     private static final Pattern HASH = Pattern.compile("^[0-9a-f]{64}$");
 
     private final FeedClient feed;
-    private final AlertRules rules;
+    private final EventProcessing processing;
     private final AlertWorkerProperties properties;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
-    private final Counter processed;
-    private final Counter duplicates;
     private final Counter feedUnavailable;
     private final AtomicReference<String> haltReason = new AtomicReference<>();
-    private final Timer deliveryLag;
     private volatile boolean lastPageFull;
     private final AtomicInteger consecutiveFailures = new AtomicInteger();
     private long failingPosition = -1;
@@ -59,29 +52,19 @@ public class AlertWorker {
 
     public AlertWorker(
             FeedClient feed,
-            AlertRules rules,
+            EventProcessing processing,
             AlertWorkerProperties properties,
             JdbcTemplate jdbc,
             PlatformTransactionManager transactionManager,
             MeterRegistry registry) {
         this.feed = feed;
-        this.rules = rules;
+        this.processing = processing;
         this.properties = properties;
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactionManager);
-        this.processed = Counter.builder("alert_worker.events.processed").register(registry);
-        this.duplicates = Counter.builder("alert_worker.events.duplicates")
-                .description("Events delivered again and skipped by the processed-event record")
-                .register(registry);
         this.feedUnavailable = Counter.builder("alert_worker.feed.unavailable").register(registry);
         Gauge.builder("alert_worker.integrity_halt", haltReason, reason -> reason.get() == null ? 0 : 1)
                 .description("1 while the worker is stopped at an untrusted event or a refused request")
-                .register(registry);
-        // 처리한 이벤트마다 발생부터 처리까지 걸린 시간. 예전 lag_seconds 게이지는 마지막 처리 이벤트 기준이라 한가할 때도
-        // 계속 늘어났다 — 적체를 재는 데 쓸 수 없었다.
-        this.deliveryLag = Timer.builder("alert_worker.delivery.lag")
-                .description("occurredAt to processing, per processed event")
-                .publishPercentiles(0.5, 0.95, 0.99)
                 .register(registry);
     }
 
@@ -170,9 +153,7 @@ public class AlertWorker {
     }
 
     private int commit(Checkpoint from, String generation, long nextAfter, List<Verified> events) {
-        List<AlertRules.Raised> raised = new ArrayList<>();
-        List<Instant> freshOccurredAt = new ArrayList<>();
-        Integer fresh = transaction.execute(status -> {
+        EventProcessing.Applied applied = transaction.execute(status -> {
             // 비교 후 갱신. 다른 인스턴스가 먼저 같은 배치를 처리했으면 아무것도 하지 않는다.
             int moved = jdbc.update(
                     "update checkpoints set generation = ?, after_seq = ?, updated_at = clock_timestamp()"
@@ -182,36 +163,14 @@ public class AlertWorker {
                 status.setRollbackOnly();
                 return null;
             }
-            int handled = 0;
-            for (Verified verified : events) {
-                JsonNode event = verified.event();
-                int inserted = jdbc.update("insert into consumed_events (event_id) values (?) on conflict do nothing",
-                        UUID.fromString(event.get("eventId").asText()));
-                if (inserted == 0) {
-                    duplicates.increment();
-                    continue;
-                }
-                raised.addAll(rules.apply(event));
-                freshOccurredAt.add(Instant.parse(event.get("occurredAt").asText()));
-                handled++;
-            }
-            return handled;
+            return processing.apply(events.stream().map(Verified::event).toList());
         });
-        if (fresh == null) {
+        if (applied == null) {
             // 다른 인스턴스가 먼저 갔다. 이번 배치는 되돌렸으므로 지표도 바꾸지 않는다.
             return 0;
         }
-        // 커밋된 뒤에만 알린다. 롤백된 경보를 로그·지표가 세면 거짓이 된다.
-        raised.forEach(rules::announce);
-        processed.increment(fresh);
-        // 새로 처리한 이벤트만 잰다(중복은 이미 한 번 잰 것이다). occurredAt은 Core DB 시계, now는 워커 시계다 — 같은
-        // 호스트가 아니면 시계 차이가 섞인다. 음수는 0으로 둔다.
-        Instant now = Instant.now();
-        for (Instant occurredAt : freshOccurredAt) {
-            Duration lag = Duration.between(occurredAt, now);
-            deliveryLag.record(lag.isNegative() ? Duration.ZERO : lag);
-        }
-        return fresh;
+        processing.afterCommit(applied);
+        return applied.fresh();
     }
 
     private void onUntrusted(long position, String reason, String receivedHash, String computedHash) {
@@ -245,7 +204,7 @@ public class AlertWorker {
     }
 
     /** 해시 형식이 아니면 남기지 않는다. 받은 값은 무엇이든 될 수 있다. */
-    private static String hashOrNull(String value) {
+    static String hashOrNull(String value) {
         return value != null && HASH.matcher(value).matches() ? value : null;
     }
 

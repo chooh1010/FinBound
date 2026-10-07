@@ -1,5 +1,8 @@
 package io.finguard.alertworker;
 
+import java.util.Map;
+
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
@@ -9,14 +12,25 @@ import org.springframework.stereotype.Component;
 class AlertWorkerHealth implements HealthIndicator {
 
     private final AlertWorker worker;
+    private final ObjectProvider<KafkaAlertConsumer> kafka;
 
-    AlertWorkerHealth(AlertWorker worker) {
+    AlertWorkerHealth(AlertWorker worker, ObjectProvider<KafkaAlertConsumer> kafka) {
         this.worker = worker;
+        this.kafka = kafka;
     }
 
     @Override
     public Health health() {
         String reason = worker.haltReason();
-        return reason == null ? Health.up().build() : Health.down().withDetail("haltReason", reason).build();
+        if (reason != null) {
+            return Health.down().withDetail("haltReason", reason).build();
+        }
+        // Kafka 출처면 멈춘 파티션이 하나라도 있으면 DOWN이다(다른 파티션은 계속 돌아도).
+        KafkaAlertConsumer consumer = kafka.getIfAvailable();
+        if (consumer != null && consumer.stoppedReason() != null) {
+            return Health.down().withDetail("consumerStopped", consumer.stoppedReason()).build();
+        }
+        Map<Integer, String> paused = consumer == null ? Map.of() : consumer.pausedPartitions();
+        return paused.isEmpty() ? Health.up().build() : Health.down().withDetail("pausedPartitions", paused).build();
     }
 }

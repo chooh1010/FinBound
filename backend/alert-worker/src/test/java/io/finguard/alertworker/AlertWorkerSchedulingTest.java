@@ -38,6 +38,6 @@ class AlertWorkerSchedulingTest {
 
     private AlertWorkerScheduling scheduling(boolean drainWhenFull) {
         return new AlertWorkerScheduling(worker, new AlertWorkerProperties("http://core", "credential", true,
-            Duration.ofSeconds(1), 100, Duration.ofSeconds(60), 5, 3, 5, drainWhenFull));
+            Duration.ofSeconds(1), 100, Duration.ofSeconds(60), 5, 3, 5, drainWhenFull, "feed"));
     }
 }
