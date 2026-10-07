@@ -10,12 +10,14 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import io.finguard.gateway.client.AiClient;
+import io.finguard.gateway.client.HttpFailures;
 import io.finguard.gateway.dto.BehaviorHistory;
 import io.finguard.gateway.dto.BehaviorRiskResult;
 import io.finguard.gateway.dto.ResolvedContext;
@@ -91,8 +93,8 @@ public class AiClientImpl implements AiClient {
                 throw new AiUnavailableException("AI behavior response has an unknown risk level");
             }
             return response;
-        } catch (RestClientException e) {
-            throw new AiUnavailableException("AI behavior API call failed", e);
+        } catch (RestClientException | InvalidMediaTypeException e) {
+            throw new AiUnavailableException("AI behavior API call failed", HttpFailures.sanitized(e));
         }
     }
 

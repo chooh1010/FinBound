@@ -55,6 +55,31 @@ class AuditPersistenceApiTest {
     @LocalServerPort
     private int port;
 
+    /** {@code %s} 셋: completedAt, counts 안쪽, responseScan의 추가 속성. */
+    private static final String MASK_OUTCOME =
+            """
+            {
+              "decision": "MASK",
+              "decisionStage": "RESPONSE",
+              "systemOutcome": "COMPLETED",
+              "reasonCodes": ["RRN_MASKED"],
+              "downstreamReached": true,
+              "responseReleased": true,
+              "success": true,
+              "recordsRead": 1,
+              "latencyMs": 140,
+              "severity": "LOW",
+              "riskFlagged": false,
+              "policyVersion": "loan-review-policy-4",
+              "completedAt": "%s",
+              "responseScan": {
+                "detectorVersion": "response-scan-1",
+                "policyVersion": "response-policy-1",
+                "counts": { %s }%s
+              }
+            }
+            """;
+
     @Autowired
     private TestRestTemplate restTemplate;
 
@@ -1050,6 +1075,34 @@ class AuditPersistenceApiTest {
                 """
                         .formatted(requestId, bodyAgentId, REQUESTED_AT);
         return exchange("/internal/v1/audits", HttpMethod.POST, body, headers);
+    }
+
+    /** 응답 단계 결과 본문(docs/04 §19.1). 실제 매퍼를 거쳐야 보이는 위반 — 중복 키, 모르는 속성, 소수 건수 — 를 본다. */
+    @Test
+    void acceptsAMaskedOutcomeThroughTheApi() {
+        String requestId = requestId();
+        createAudit(requestId, "LOAN-AGENT-01", "LOAN-AGENT-01", true);
+
+        ResponseEntity<JsonNode> response = updateOutcome(requestId, "LOAN-AGENT-01",
+                MASK_OUTCOME.formatted(COMPLETED_AT, "\"RRN\": 1, \"ACCOUNT_NUMBER\": 0, \"PHONE_NUMBER\": 0,"
+                        + " \"OTHER_CUSTOMER\": 0", ""));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(auditStatus(requestId)).isEqualTo("COMPLETED");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "\"RRN\": 256, \"RRN\": 0, \"ACCOUNT_NUMBER\": 0, \"PHONE_NUMBER\": 0, \"OTHER_CUSTOMER\": 0|",
+        "\"RRN\": 1.5, \"ACCOUNT_NUMBER\": 0, \"PHONE_NUMBER\": 0, \"OTHER_CUSTOMER\": 0|",
+        "\"RRN\": 1, \"ACCOUNT_NUMBER\": 0, \"PHONE_NUMBER\": 0, \"OTHER_CUSTOMER\": 0|, \"findings\": [{\"start\": 0, \"end\": 14}]",
+        "\"RRN\": 1, \"ACCOUNT_NUMBER\": 0, \"PHONE_NUMBER\": 0, \"OTHER_CUSTOMER\": 0|, \"text\": \"900101-1234567\""
+    })
+    void rejectsAResponseScanThatOnlyTheRealMapperWouldLetThrough(String countsAndExtra) {
+        String[] parts = countsAndExtra.split("[|]", 2);
+
+        // completedAt 자리는 그대로 두고(assertOutcomeRejected가 채운다) 건수와 추가 속성만 채운다.
+        assertOutcomeRejected(MASK_OUTCOME.formatted("%s", parts[0], parts[1]));
     }
 
     /** 결과 본문이 거부되고 감사행이 PROCESSING에 머무르는지 본다. {@code %s}는 completedAt이다. */

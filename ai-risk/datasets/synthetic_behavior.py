@@ -27,7 +27,16 @@ BLOCK_BURST_SESSION_RATE = 0.08
 BLOCK_BURST_MAX_SIZE = 3
 MAX_BLOCKS_PER_WINDOW = 3
 KST = timezone(timedelta(hours=9))
-TOOLS = tuple(FinancialTool)
+# Behavior-risk training only simulates the numeric Read tools (SPEC docs/04 §19.1: the
+# document tool is checked by the response-scan detector instead and is not part of this
+# cadence-based anomaly model), so TOOLS must stay in sync with TOOL_DATA below rather than
+# iterating every FinancialTool member.
+TOOL_DATA = {
+    FinancialTool.CREDIT_SCORE_READ: FinancialDataType.CREDIT_SCORE,
+    FinancialTool.INCOME_READ: FinancialDataType.INCOME,
+    FinancialTool.DEBT_READ: FinancialDataType.DEBT,
+}
+TOOLS = tuple(TOOL_DATA)
 NORMAL_SCENARIOS = (
     "STANDARD_BUSINESS_HOURS",
     "END_OF_DAY_INCREASE",
@@ -42,11 +51,6 @@ ANOMALY_SCENARIOS = (
 ANOMALY_EXPECTED_LEVELS = {
     "RAPID_REPETITION": "ALERT",
     "AFTER_HOURS_ACCUMULATION": "CRITICAL",
-}
-TOOL_DATA = {
-    FinancialTool.CREDIT_SCORE_READ: FinancialDataType.CREDIT_SCORE,
-    FinancialTool.INCOME_READ: FinancialDataType.INCOME,
-    FinancialTool.DEBT_READ: FinancialDataType.DEBT,
 }
 
 

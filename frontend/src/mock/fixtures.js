@@ -118,6 +118,7 @@ const requestedDataByTool = {
   CREDIT_SCORE_READ: ['CREDIT_SCORE'],
   INCOME_READ: ['INCOME'],
   DEBT_READ: ['DEBT'],
+  LOAN_APPLICATION_READ: ['LOAN_APPLICATION'],
 }
 
 function createAttempt({ requestId, label, description, targetConsumerId, tool, decision, reasonCodes = [], scopeStatus = okScope }) {

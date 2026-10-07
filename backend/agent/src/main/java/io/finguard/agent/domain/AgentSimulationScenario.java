@@ -12,7 +12,11 @@ public enum AgentSimulationScenario {
     TOOL_SCOPE_ATTACK("CUST-1002", FinancialTool.INCOME_READ, FinancialDataType.INCOME),
     DATA_SCOPE_ATTACK("CUST-1002", FinancialTool.CREDIT_SCORE_READ,
             FinancialDataType.CREDIT_SCORE, FinancialDataType.INCOME),
-    MANDATE_SCOPE_ATTACK("CUST-1003", FinancialTool.DEBT_READ, FinancialDataType.DEBT);
+    MANDATE_SCOPE_ATTACK("CUST-1003", FinancialTool.DEBT_READ, FinancialDataType.DEBT),
+    // 응답 단계 시나리오(docs/04 §19). 고객마다 Mock 금융의 고정 문서가 다르다: 1001 개인정보, 1002 없음, 1003 다른 고객.
+    DOCUMENT_WITH_PII("CUST-1001", FinancialTool.LOAN_APPLICATION_READ, FinancialDataType.LOAN_APPLICATION),
+    DOCUMENT_CLEAN("CUST-1002", FinancialTool.LOAN_APPLICATION_READ, FinancialDataType.LOAN_APPLICATION),
+    DOCUMENT_OTHER_CUSTOMER("CUST-1003", FinancialTool.LOAN_APPLICATION_READ, FinancialDataType.LOAN_APPLICATION);
 
     private final String targetConsumerId;
     private final FinancialTool tool;

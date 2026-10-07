@@ -306,6 +306,77 @@ describe('FinBound P0 application', () => {
     )
   })
 
+  it('shows a masked attempt as released with its content gated, not as a block', async () => {
+    vi.spyOn(finboundApi, 'executeAgentTask').mockResolvedValueOnce({
+      status: 'COMPLETED',
+      title: 'AI 업무 처리가 완료되었습니다',
+      message: '실행 결과를 확인해 주세요.',
+      resultHeading: 'Agent 실행 결과',
+      resultItems: ['정상 확인 0건', '안전 차단 0건', '개인정보 가림 제공 1건'],
+      nextAction: '가림 처리된 자료를 확인해 주세요.',
+      attempts: [{
+        requestId: 'REQ-MASK-ATTEMPT',
+        decision: 'MASK',
+        decisionStage: 'RESPONSE',
+        systemOutcome: 'COMPLETED',
+        label: '대출신청서 확인',
+        description: '금융시스템 조회는 완료했지만 응답에서 개인정보로 보이는 부분을 가리고 제공했습니다.',
+        targetConsumerId: 'CUST-1001',
+        scopeStatus: { customerScope: 'OK' },
+        reasonCodes: ['RRN_MASKED'],
+        downstreamReached: true,
+        responseReleased: true,
+        tool: 'LOAN_APPLICATION_READ',
+        requestedData: ['LOAN_APPLICATION'],
+      }],
+    })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.get('.agent-task-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('가림 제공')
+    expect(wrapper.get('.attempt-list li').classes()).toContain('mask')
+    expect(wrapper.get('.attempt-list li').text()).toContain('가리고 제공')
+    expect(wrapper.get('.attempt-list li').text()).not.toContain('차단')
+  })
+
+  it('describes a response-stage blocked attempt as a withheld result after a completed lookup', async () => {
+    vi.spyOn(finboundApi, 'executeAgentTask').mockResolvedValueOnce({
+      status: 'COMPLETED',
+      title: 'AI 업무 처리가 완료되었습니다',
+      message: '실행 결과를 확인해 주세요.',
+      resultHeading: 'Agent 실행 결과',
+      resultItems: ['정상 확인 0건', '안전 차단 1건'],
+      nextAction: '차단 사유를 확인해 주세요.',
+      attempts: [{
+        requestId: 'REQ-RESPONSE-BLOCK-ATTEMPT',
+        decision: 'BLOCK',
+        decisionStage: 'RESPONSE',
+        systemOutcome: 'COMPLETED',
+        label: '대출신청서 확인',
+        description: '금융시스템 조회는 완료했지만 응답에 다른 고객 정보가 있어 결과를 제공하지 않았습니다.',
+        targetConsumerId: 'CUST-1003',
+        scopeStatus: { customerScope: 'OK' },
+        reasonCodes: ['OTHER_CUSTOMER_DATA_IN_RESPONSE'],
+        downstreamReached: true,
+        responseReleased: false,
+        tool: 'LOAN_APPLICATION_READ',
+        requestedData: ['LOAN_APPLICATION'],
+      }],
+    })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.get('.agent-task-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('.attempt-list li').text()).toContain('결과 차단')
+    expect(wrapper.get('.attempt-list li').text()).toContain('조회는 완료')
+    expect(wrapper.get('.attempt-list li').text()).not.toContain('조회 전에 차단')
+  })
+
   it.each([
     ['NEW_LOAN', 3, 0, null],
     ['LIMIT_REVIEW', 2, 1, 'CASE_SCOPE_VIOLATION'],
@@ -546,6 +617,147 @@ describe('FinBound P0 application', () => {
     expect(wrapper.get('.event-detail').text()).not.toContain('조회 완료')
   })
 
+  it('shows a response-stage MASK audit record with its response-scan section', async () => {
+    const masked = mapAuditEvent({
+      auditEventId: 'AUD-MASK',
+      requestId: 'REQ-MASK',
+      agentId: 'LOAN-AGENT-01',
+      agentRunId: 'RUN-MASK',
+      caseId: 'LOAN-2026-001',
+      targetConsumerId: 'CUST-1001',
+      requestedTool: 'LOAN_APPLICATION_READ',
+      requestedData: ['LOAN_APPLICATION'],
+      status: 'COMPLETED',
+      systemOutcome: 'COMPLETED',
+      decision: 'MASK',
+      decisionStage: 'RESPONSE',
+      reasonCodes: ['RRN_MASKED', 'PHONE_NUMBER_MASKED'],
+      downstreamReached: true,
+      responseReleased: true,
+      responseScan: {
+        detectorVersion: 'response-scan-1',
+        policyVersion: 'response-policy-1',
+        counts: { RRN: 1, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 2, OTHER_CUSTOMER: 0 },
+      },
+      requestedAt: '2026-09-03T10:00:00+09:00',
+    })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, mask: 1, error: 0, outcomeUnknown: 0 })
+    vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
+      items: [masked],
+      page: 1,
+      pageSize: 5,
+      totalItems: 1,
+      totalPages: 1,
+      filterOptions: { agentIds: [], caseIds: [], consumerIds: [], tools: [], reasonCodes: [] },
+    })
+    vi.spyOn(finboundApi, 'getAuditEvent').mockResolvedValue(masked)
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-screen="dashboard"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.event-row .status-badge').text()).toBe('가림')
+    expect(wrapper.get('.event-row .status-badge').classes()).toContain('status-mask')
+    expect(wrapper.get('.metric-mask strong').text()).toBe('1')
+    const detail = wrapper.get('.event-detail')
+    expect(detail.text()).toContain('응답 검사')
+    expect(detail.text()).toContain('주민등록번호')
+    expect(detail.text()).toContain('전화번호')
+    expect(detail.text()).toContain('response-scan-1')
+    expect(detail.text()).toContain('response-policy-1')
+    expect(detail.text()).not.toContain('차단')
+  })
+
+  it('shows a failed response-scan as incomplete instead of zero counts', async () => {
+    // RESPONSE/ERROR(검사 실패·시간 초과)는 responseScan이 없다(docs/04 §19.1). 믿을 수 있는
+    // 건수가 없으므로 범주별 0건을 보이면 안 되고, 검사가 끝나지 않았다는 사실을 보여야 한다.
+    const scanFailed = mapAuditEvent({
+      auditEventId: 'AUD-SCAN-FAILED',
+      requestId: 'REQ-SCAN-FAILED',
+      agentId: 'LOAN-AGENT-01',
+      agentRunId: 'RUN-SCAN-FAILED',
+      caseId: 'LOAN-2026-001',
+      targetConsumerId: 'CUST-1001',
+      requestedTool: 'LOAN_APPLICATION_READ',
+      requestedData: ['LOAN_APPLICATION'],
+      status: 'ERROR',
+      systemOutcome: 'ERROR',
+      decision: 'ALLOW',
+      decisionStage: 'RESPONSE',
+      reasonCodes: ['RESPONSE_SCAN_UNAVAILABLE'],
+      downstreamReached: true,
+      responseReleased: false,
+      requestedAt: '2026-09-03T10:00:00+09:00',
+    })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 0, block: 0, mask: 0, error: 1, outcomeUnknown: 0 })
+    vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
+      items: [scanFailed],
+      page: 1,
+      pageSize: 5,
+      totalItems: 1,
+      totalPages: 1,
+      filterOptions: { agentIds: [], caseIds: [], consumerIds: [], tools: [], reasonCodes: [] },
+    })
+    vi.spyOn(finboundApi, 'getAuditEvent').mockResolvedValue(scanFailed)
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-screen="dashboard"]').trigger('click')
+    await flushPromises()
+
+    const detail = wrapper.get('.event-detail')
+    expect(detail.text()).toContain('응답 검사')
+    expect(detail.text()).toContain('검사 미완료')
+    expect(detail.find('.response-scan-counts').exists()).toBe(false)
+    expect(detail.text()).not.toContain('주민등록번호')
+    expect(detail.text()).not.toContain('0건')
+  })
+
+  it('does not render a response-scan section for a request-stage audit record', async () => {
+    const normal = mapAuditEvent({
+      auditEventId: 'AUD-NORMAL',
+      requestId: 'REQ-NORMAL',
+      agentId: 'LOAN-AGENT-01',
+      agentRunId: 'RUN-NORMAL',
+      caseId: 'LOAN-2026-001',
+      targetConsumerId: 'CUST-1001',
+      requestedTool: 'CREDIT_SCORE_READ',
+      requestedData: ['CREDIT_SCORE'],
+      status: 'COMPLETED',
+      systemOutcome: 'COMPLETED',
+      decision: 'ALLOW',
+      reasonCodes: [],
+      downstreamReached: true,
+      responseReleased: true,
+      requestedAt: '2026-09-03T10:00:00+09:00',
+    })
+    vi.spyOn(finboundApi, 'getDashboardSummary').mockResolvedValue({ total: 1, allow: 1, block: 0, mask: 0, error: 0, outcomeUnknown: 0 })
+    vi.spyOn(finboundApi, 'getAuditEvents').mockResolvedValue({
+      items: [normal],
+      page: 1,
+      pageSize: 5,
+      totalItems: 1,
+      totalPages: 1,
+      filterOptions: { agentIds: [], caseIds: [], consumerIds: [], tools: [], reasonCodes: [] },
+    })
+    vi.spyOn(finboundApi, 'getAuditEvent').mockResolvedValue(normal)
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-screen="dashboard"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.response-scan-section').exists()).toBe(false)
+  })
+
+  it('offers MASK as a dashboard outcome filter option', async () => {
+    const wrapper = mount(App)
+
+    await wrapper.get('[data-screen="dashboard"]').trigger('click')
+    await flushPromises()
+
+    const options = wrapper.get('[data-filter="outcome"]').findAll('option').map((option) => option.element.value)
+    expect(options).toContain('MASK')
+  })
+
   it('keeps a failed dashboard summary unavailable when the event list succeeds', async () => {
     vi.spyOn(finboundApi, 'getDashboardSummary').mockRejectedValue(new Error('summary unavailable'))
     const wrapper = mount(App)
@@ -554,8 +766,8 @@ describe('FinBound P0 application', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('안전 현황 요약을 불러오지 못했습니다')
-    // 전체·정상·차단·오류·승인 필요·결과 미확인 여섯 칸 모두 값 대신 자리표시가 남는다.
-    expect(wrapper.findAll('.metric-grid strong').map((node) => node.text())).toEqual(['—', '—', '—', '—', '—', '—'])
+    // 전체·정상·차단·승인 필요·가림 제공·오류·결과 미확인 일곱 칸 모두 값 대신 자리표시가 남는다.
+    expect(wrapper.findAll('.metric-grid strong').map((node) => node.text())).toEqual(['—', '—', '—', '—', '—', '—', '—'])
     expect(wrapper.findAll('.event-row').length).toBeGreaterThan(0)
     expect(wrapper.text()).not.toContain('안전 현황 요약을 불러오지 못했습니다. 연결 상태와 조회 권한을 확인해 주세요.0')
   })

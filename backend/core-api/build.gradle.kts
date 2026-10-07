@@ -30,4 +30,6 @@ dependencies {
 
 tasks.test {
     systemProperty("finguard.repository.root", rootProject.projectDir.absolutePath)
+    // Contract fixtures live outside the module; declare them so a fixture change reruns the tests.
+    inputs.dir(rootProject.file("contracts"))
 }

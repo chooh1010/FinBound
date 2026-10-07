@@ -45,6 +45,35 @@ class AuditRuntimeContractTest {
         assertFalse(errors.isEmpty(), () -> scenario + " should be rejected");
     }
 
+    // 응답 단계(5단계) fixture는 이름이 기대를 말한다: {schema}.response-{case}.{valid|invalid}.json. 목록에 손으로 넣지 않아
+    // fixture를 더하면 바로 시험된다.
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("responseStageContracts")
+    void responseStageFixtureMatchesItsName(String fixtureFile) throws IOException {
+        String schemaFile = fixtureFile.substring(0, fixtureFile.indexOf(".response-")) + ".schema.json";
+        List<Error> errors = validate(schemaFile, fixtureFile);
+
+        if (fixtureFile.endsWith(".valid.json")) {
+            assertTrue(errors.isEmpty(), () -> fixtureFile + " should be valid, but was: " + errors);
+        } else {
+            assertFalse(errors.isEmpty(), () -> fixtureFile + " should be rejected");
+        }
+    }
+
+    private static Stream<String> responseStageContracts() throws IOException {
+        try (Stream<Path> files = Files.list(CONTRACT_DIRECTORY.resolve("fixtures"))) {
+            List<String> names = files.map(path -> path.getFileName().toString())
+                .filter(name -> name.contains(".response-"))
+                .sorted()
+                .toList();
+            if (names.stream().noneMatch(name -> name.endsWith(".valid.json"))
+                    || names.stream().noneMatch(name -> name.endsWith(".invalid.json"))) {
+                throw new IllegalStateException("response-stage fixtures are missing");
+            }
+            return names.stream();
+        }
+    }
+
     private static Stream<Arguments> validContracts() {
         return Stream.of(
             Arguments.of(

@@ -247,4 +247,34 @@ class AiClientImplTest {
             Instant.parse("2026-08-17T12:00:00Z")))
             .isInstanceOf(AiUnavailableException.class);
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "500|{\"detail\":\"LEAKMARKER900101\"}",
+        "200|{\"behaviorRisk\":\"LEAKMARKER900101\"}",
+        "200|{}|LEAKMARKER900101"
+    })
+    void failuresDoNotCarryTheResponseBody(String statusAndBody) {
+        String[] parts = statusAndBody.split("[|]", 3);
+        String contentType = parts.length == 3 ? parts[2] : "application/json";
+        server.stubFor(post(urlEqualTo("/internal/v1/risk/behavior"))
+            .willReturn(aResponse().withStatus(Integer.parseInt(parts[0]))
+                .withHeader("Content-Type", contentType).withBody(parts[1])));
+        ToolCallRequest request = new ToolCallRequest(
+            "RUN-001", "PASS-001", FinancialTool.CREDIT_SCORE_READ, "CUST-1001",
+            List.of(FinancialDataType.CREDIT_SCORE), FinancialAction.READ);
+        ResolvedContext context = new ResolvedContext(
+            UUID.randomUUID(),
+            new ResolvedContext.References("EMP-101", "LOAN-2026-001", "PASS-001"),
+            ScopeStatus.allOk(),
+            PromptRiskSnapshot.notEvaluated());
+
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> client.evaluateBehavior(
+            VerifiedAgentIdentity.verified("LOAN-AGENT-01"), request, context,
+            new BehaviorHistory("LOAN-AGENT-01", "5m", List.of()), "REQ-4", "trace",
+            Instant.parse("2026-08-17T12:00:00Z")));
+
+        assertThat(failure).isInstanceOf(AiUnavailableException.class);
+        assertThat(MockFinanceClientLeakTest.rendered(failure)).doesNotContain("LEAKMARKER900101");
+    }
 }

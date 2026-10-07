@@ -101,7 +101,8 @@ class AgentRunServiceTest {
                         started.passportId());
 
         assertThat(consumerId).isEqualTo("CUST-1001");
-        assertThat(tools).containsExactlyInAnyOrder("CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ");
+        assertThat(tools).containsExactlyInAnyOrder(
+                "CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ");
     }
 
     @Test

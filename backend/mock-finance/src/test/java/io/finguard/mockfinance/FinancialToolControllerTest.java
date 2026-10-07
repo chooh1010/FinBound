@@ -109,6 +109,39 @@ class FinancialToolControllerTest {
         assertThat(invocationCounter.count(FinancialTool.DEBT_READ)).isEqualTo(1);
     }
 
+    /** 대출 신청서는 고객별 고정 문서(합성 값)다. 응답 검사 시나리오가 고객마다 다른 결과를 낸다(docs/04 §19). */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "CUST-1001, 900101-1234567",
+        "CUST-1002, 소득 증빙 서류 제출 완료",
+        "CUST-1003, CUST-1001"
+    })
+    void returnsTheFixedLoanApplicationOfEachCustomer(String consumerId, String expectedFragment) throws Exception {
+        String body = mockMvc.perform(post(ENDPOINT)
+                        .header(INTERNAL_CREDENTIAL_HEADER, VALID_CREDENTIAL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson(FinancialTool.LOAN_APPLICATION_READ.name(), consumerId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tool").value("LOAN_APPLICATION_READ"))
+                .andExpect(jsonPath("$.consumerId").value(consumerId))
+                .andExpect(jsonPath("$.result.documentText").isString())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(body).contains(expectedFragment);
+        // 결과는 문서 하나뿐이다. 숫자 값이 섞여 나가지 않는다.
+        assertThat(new com.fasterxml.jackson.databind.ObjectMapper().readTree(body).get("result").size()).isEqualTo(1);
+    }
+
+    @Test
+    void hasNoLoanApplicationForCustomersOutsideTheScenarios() throws Exception {
+        mockMvc.perform(post(ENDPOINT)
+                        .header(INTERNAL_CREDENTIAL_HEADER, VALID_CREDENTIAL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson(FinancialTool.LOAN_APPLICATION_READ.name(), "CUST-9999")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("FINANCIAL_DATA_NOT_FOUND"));
+    }
+
     @Test
     void allowsHealthCheckWithoutInternalCredential() throws Exception {
         mockMvc.perform(get("/actuator/health"))

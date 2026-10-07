@@ -1,0 +1,14 @@
+{
+  "requestId": "REQ-506",
+  "decision": "BLOCK",
+  "decisionStage": "REQUEST",
+  "systemOutcome": "COMPLETED",
+  "reasonCodes": [
+    "CASE_SCOPE_VIOLATION"
+  ],
+  "downstreamReached": false,
+  "responseReleased": false,
+  "severity": "CRITICAL",
+  "riskFlagged": true,
+  "completedAt": "2026-10-07T21:00:06+09:00"
+}

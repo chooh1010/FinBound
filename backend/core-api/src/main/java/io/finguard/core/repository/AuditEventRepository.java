@@ -46,7 +46,7 @@ public interface AuditEventRepository
     List<AuditEvent> findByAgentRunIdOrderByRequestedAtAscAuditEventIdAsc(String agentRunId);
 
     /**
-     * Behavior History에 실을 행: 판정이 끝난 COMPLETED(ALLOW·BLOCK)와, 허용된 뒤 실행에서 실패한 ALLOW·ERROR.
+     * Behavior History에 실을 행: 판정이 끝난 COMPLETED(ALLOW·BLOCK·MASK — MASK는 ALLOW로 바꿔 보낸다)와, 허용된 뒤 실행에서 실패한 ALLOW·ERROR.
      *
      * <p>ALLOW·ERROR를 빼면 실행 실패가 이력에 한 번도 실리지 않아 {@code errorRatio5m}이 실패를 볼 수 없다
      * (docs/03 §8). 판정 전 오류(decision 없음)·PROCESSING·OUTCOME_UNKNOWN은 결과를 모르므로 뺀다.
@@ -59,7 +59,8 @@ public interface AuditEventRepository
               and e.requestedAt >= :since
               and ((e.status = io.finguard.core.domain.AuditStatus.COMPLETED
                     and e.decision in (io.finguard.core.domain.PolicyDecision.ALLOW,
-                                       io.finguard.core.domain.PolicyDecision.BLOCK))
+                                       io.finguard.core.domain.PolicyDecision.BLOCK,
+                                       io.finguard.core.domain.PolicyDecision.MASK))
                    or (e.status = io.finguard.core.domain.AuditStatus.ERROR
                        and e.decision = io.finguard.core.domain.PolicyDecision.ALLOW))
             order by e.requestedAt desc

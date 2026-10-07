@@ -7,6 +7,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,21 @@ class ApprovalNotificationConsumerTest {
     @ValueSource(strings = {"APPROVAL_BOUND", "APPROVAL_CONSUMED", "TOOL_CALL_FINALIZED"})
     void bindingUseAndToolCallsNotifyNobody(String type) throws Exception {
         consumer.handle(event(type, "{\"approvalRequestId\":\"APR-1\",\"requesterEmployeeId\":\"EMP-101\"}"));
+
+        verifyNoInteractions(jdbc);
+    }
+
+    /** 응답 단계 Tool Call 결과(MASK, 호출 후 BLOCK, 검사 실패)도 알림을 만들지 않는다. 계약 fixture 그대로 넣는다. */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "event.tool-call-response-mask.valid.json",
+        "event.tool-call-response-block.valid.json",
+        "event.tool-call-response-error.valid.json",
+        "event.tool-call-response-scan-disabled.valid.json"
+    })
+    void responseStageToolCallsNotifyNobody(String fixture) throws Exception {
+        consumer.handle(JSON.readTree(Files.readString(Path.of(
+                System.getProperty("finguard.repository.root"), "contracts", "events", "fixtures", fixture))));
 
         verifyNoInteractions(jdbc);
     }

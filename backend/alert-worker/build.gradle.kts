@@ -24,4 +24,6 @@ tasks.test {
     systemProperty("finguard.repository.root", rootProject.projectDir.absolutePath)
     // 모듈 밖 파일이라 선언하지 않으면 스크립트를 바꿔도 Gradle이 이전 시험 결과를 재사용한다.
     inputs.dir(rootProject.file("infrastructure/postgres-init"))
+    // Contract fixtures live outside the module; declare them so a fixture change reruns the tests.
+    inputs.dir(rootProject.file("contracts"))
 }

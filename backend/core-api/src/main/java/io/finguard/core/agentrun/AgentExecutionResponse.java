@@ -2,6 +2,7 @@ package io.finguard.core.agentrun;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -11,6 +12,7 @@ import io.finguard.core.domain.ApprovalStatus;
 import io.finguard.core.domain.AuditScopeStatus;
 import io.finguard.core.domain.AuditStatus;
 import io.finguard.core.domain.DataType;
+import io.finguard.core.domain.DecisionStage;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.Tool;
 
@@ -38,7 +40,10 @@ public record AgentExecutionResponse(
             String errorLocation,
             Instant requestedAt,
             Instant completedAt,
-            String approvalRequestId) {
+            String approvalRequestId,
+            // 응답 단계 결과에만 RESPONSE와 검사 증거(건수·버전)를 싣는다(docs/04 §19.1). 호출 전 결과는 둘 다 빠진다.
+            DecisionStage decisionStage,
+            Map<String, Object> responseScan) {
     }
 
     /**

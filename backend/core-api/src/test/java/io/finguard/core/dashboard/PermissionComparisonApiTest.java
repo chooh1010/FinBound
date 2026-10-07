@@ -159,15 +159,16 @@ class PermissionComparisonApiTest {
         assertThat(body.get("passportId").asText()).isEqualTo("PASS-700");
 
         assertThat(toList(body.get("employeeAuthority").get("allowedTools")))
-                .containsExactlyInAnyOrder("CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ");
+                .containsExactlyInAnyOrder(
+                "CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ");
         assertThat(toList(body.get("agentEffectivePermission").get("allowedTools")))
                 .containsExactly("CREDIT_SCORE_READ");
 
         // 이 목록이 이 화면의 존재 이유다 — 직원은 되는데 Agent는 안 되는 것.
         assertThat(toList(body.get("withheldTools")))
-                .containsExactlyInAnyOrder("INCOME_READ", "DEBT_READ");
+                .containsExactlyInAnyOrder("INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ");
         assertThat(toList(body.get("withheldData")))
-                .containsExactlyInAnyOrder("INCOME", "DEBT");
+                .containsExactlyInAnyOrder("INCOME", "DEBT", "LOAN_APPLICATION");
     }
 
     @Test

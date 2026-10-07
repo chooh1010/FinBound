@@ -176,7 +176,7 @@ P1:
 
 ```text
 APPROVAL   (구현: loan-review-policy-3)
-MASK       (미구현 — 응답 속 민감정보 검사 단계에서)
+MASK       (구현: 응답 단계 판정, response-policy-1 — docs/04 §19)
 ```
 
 `APPROVAL`은 "실행하지 않고 사람의 확인을 기다린다"는 판정이다. BLOCK처럼 Tool을 실행하지 않으므로 감사 행은
@@ -184,6 +184,10 @@ MASK       (미구현 — 응답 속 민감정보 검사 단계에서)
 (`approval_requests`, 상태 `PENDING`)이 가진다 — 확정된 감사 기록은 다시 쓰지 않는다(§10).
 승인 요청은 APPROVER가 승인·거절하고, 처리되지 않으면 만료된다. 승인된 요청은 직원이 그 승인을 지정해 **다시 실행**할 때만
 쓰인다(자동 재개 없음, docs/04 §3·§15.1).
+
+`MASK`는 "실행했고, 응답 속 개인정보를 범주 표시로 가려 내보낸다"는 판정이다. 호출 전에는 응답 내용을 모르므로
+호출 후 응답 단계(`decisionStage = RESPONSE`)에서만 나온다. 응답 단계에는 BLOCK도 있다 — 대상이 아닌 다른 고객의 정보가
+응답에 있으면 호출은 됐지만 결과를 내보내지 않는다. 상태 표는 docs/04 §19.1이다.
 
 시스템 장애는 Decision Enum에 `ERROR`를 추가하지 않고 Audit/System Outcome으로 표현한다.
 
@@ -296,6 +300,7 @@ CRITICAL
 CREDIT_SCORE_READ
 INCOME_READ
 DEBT_READ
+LOAN_APPLICATION_READ   (자유 텍스트 — 응답을 검사한 뒤 내보낸다, docs/04 §19)
 ```
 
 P0에서 문자열 자유입력을 허용하지 않는다.
@@ -308,6 +313,7 @@ P0에서 문자열 자유입력을 허용하지 않는다.
 CREDIT_SCORE
 INCOME
 DEBT
+LOAN_APPLICATION
 ```
 
 P1 확장 예:

@@ -41,6 +41,7 @@ import io.finguard.gateway.exception.DownstreamTimeoutException;
 import io.finguard.gateway.exception.DownstreamUnavailableException;
 import io.finguard.gateway.exception.DuplicateRequestException;
 import io.finguard.gateway.identity.VerifiedAgentIdentity;
+import io.finguard.gateway.response.ResponseInspectors;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class ToolCallEnforcementServiceTest {
@@ -51,7 +52,8 @@ class ToolCallEnforcementServiceTest {
     private final CoreClient coreClient = mock(CoreClient.class);
     private final DownstreamClient downstreamClient = mock(DownstreamClient.class);
     private final ToolCallEnforcementService service = new ToolCallEnforcementService(
-            authorizationService, coreClient, downstreamClient, CLOCK, new SimpleMeterRegistry());
+        authorizationService, coreClient, downstreamClient, CLOCK,
+        new SimpleMeterRegistry(), ResponseInspectors.disabled(CLOCK));
 
     private final VerifiedAgentIdentity identity = VerifiedAgentIdentity.verified("LOAN-AGENT-01");
     private final ToolCallRequest request = new ToolCallRequest(
@@ -86,7 +88,8 @@ class ToolCallEnforcementServiceTest {
             completedAt,
             completedAt);
         ToolCallEnforcementService advancingService = new ToolCallEnforcementService(
-            authorizationService, coreClient, downstreamClient, advancingClock, new SimpleMeterRegistry());
+            authorizationService, coreClient, downstreamClient, advancingClock,
+            new SimpleMeterRegistry(), ResponseInspectors.disabled(advancingClock));
         when(authorizationService.decide(any(), any(), any(), any(), any()))
             .thenReturn(allowOutcome());
         when(downstreamClient.execute(any(), any(), any())).thenReturn(
@@ -105,7 +108,8 @@ class ToolCallEnforcementServiceTest {
         Clock advancingClock = mock(Clock.class);
         when(advancingClock.instant()).thenReturn(requestedAt, completedAt);
         ToolCallEnforcementService advancingService = new ToolCallEnforcementService(
-            authorizationService, coreClient, downstreamClient, advancingClock, new SimpleMeterRegistry());
+            authorizationService, coreClient, downstreamClient, advancingClock,
+            new SimpleMeterRegistry(), ResponseInspectors.disabled(advancingClock));
         when(authorizationService.decide(any(), any(), any(), any(), any())).thenReturn(
             new AuthorizationOutcome(
                 new PolicyDecisionResult(PolicyDecision.BLOCK, "HIGH", true,
@@ -124,7 +128,8 @@ class ToolCallEnforcementServiceTest {
         Clock advancingClock = mock(Clock.class);
         when(advancingClock.instant()).thenReturn(requestedAt, completedAt);
         ToolCallEnforcementService advancingService = new ToolCallEnforcementService(
-            authorizationService, coreClient, downstreamClient, advancingClock, new SimpleMeterRegistry());
+            authorizationService, coreClient, downstreamClient, advancingClock,
+            new SimpleMeterRegistry(), ResponseInspectors.disabled(advancingClock));
         when(authorizationService.decide(any(), any(), any(), any(), any()))
             .thenReturn(AuthorizationOutcome.failClosed("POLICY_ENGINE_UNAVAILABLE"));
 
@@ -140,7 +145,8 @@ class ToolCallEnforcementServiceTest {
         Clock advancingClock = mock(Clock.class);
         when(advancingClock.instant()).thenReturn(requestedAt, requestedAt, completedAt);
         ToolCallEnforcementService advancingService = new ToolCallEnforcementService(
-            authorizationService, coreClient, downstreamClient, advancingClock, new SimpleMeterRegistry());
+            authorizationService, coreClient, downstreamClient, advancingClock,
+            new SimpleMeterRegistry(), ResponseInspectors.disabled(advancingClock));
         when(authorizationService.decide(any(), any(), any(), any(), any()))
             .thenReturn(allowOutcome());
         doThrow(new DownstreamTimeoutException("timeout", new RuntimeException()))

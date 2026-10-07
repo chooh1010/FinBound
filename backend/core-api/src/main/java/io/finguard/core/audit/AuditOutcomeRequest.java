@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Set;
 
 import io.finguard.core.domain.AuditStatus;
+import io.finguard.core.domain.DecisionStage;
 import io.finguard.core.domain.PolicyDecision;
 import io.finguard.core.domain.ReasonCode;
 import io.finguard.core.domain.Severity;
@@ -33,7 +34,31 @@ public record AuditOutcomeRequest(
         Boolean riskFlagged,
         @Size(max = 64) String policyVersion,
         @NotNull Instant completedAt,
-        @Valid PolicyInputRequest policyInput) {
+        @Valid PolicyInputRequest policyInput,
+        DecisionStage decisionStage,
+        @Valid ResponseScanRequest responseScan) {
+
+    /** 응답 단계가 없던 Gateway의 요청 모양(5단계 이전). */
+    public AuditOutcomeRequest(
+            PolicyDecision decision,
+            AuditStatus systemOutcome,
+            Set<ReasonCode> reasonCodes,
+            Boolean downstreamReached,
+            Boolean responseReleased,
+            Boolean success,
+            Integer recordsRead,
+            Long latencyMs,
+            String errorLocation,
+            BigDecimal behaviorRisk,
+            Severity severity,
+            Boolean riskFlagged,
+            String policyVersion,
+            Instant completedAt,
+            PolicyInputRequest policyInput) {
+        this(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success, recordsRead,
+                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt, policyInput,
+                null, null);
+    }
 
     /** 판정 입력 스냅샷 없이 보내던 Gateway의 요청 모양. */
     public AuditOutcomeRequest(
@@ -52,7 +77,8 @@ public record AuditOutcomeRequest(
             String policyVersion,
             Instant completedAt) {
         this(decision, systemOutcome, reasonCodes, downstreamReached, responseReleased, success, recordsRead,
-                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt, null);
+                latencyMs, errorLocation, behaviorRisk, severity, riskFlagged, policyVersion, completedAt,
+                (PolicyInputRequest) null);
     }
 
     public AuditOutcomeRequest {
@@ -122,9 +148,9 @@ public record AuditOutcomeRequest(
         return systemOutcome != AuditStatus.ERROR || Boolean.FALSE.equals(success);
     }
 
-    @AssertTrue(message = "ALLOW with COMPLETED must report success")
+    @AssertTrue(message = "ALLOW or MASK with COMPLETED must report success")
     public boolean isAllowedCompletionSuccessful() {
-        return decision != PolicyDecision.ALLOW
+        return !releasesResponse()
                 || systemOutcome != AuditStatus.COMPLETED
                 || Boolean.TRUE.equals(success);
     }
@@ -154,15 +180,22 @@ public record AuditOutcomeRequest(
                 || (reasonCodes != null && !reasonCodes.isEmpty());
     }
 
-    @AssertTrue(message = "ALLOW with COMPLETED must reach downstream and release the response")
+    @AssertTrue(message = "ALLOW or MASK with COMPLETED must reach downstream and release the response")
     public boolean isAllowedCompletionDelivered() {
-        return decision != PolicyDecision.ALLOW
+        return !releasesResponse()
                 || systemOutcome != AuditStatus.COMPLETED
                 || (Boolean.TRUE.equals(downstreamReached) && Boolean.TRUE.equals(responseReleased));
     }
 
-    /** BLOCK·APPROVAL처럼 Tool을 실행하지 않은 판정이 아니면 참. 실행하지 않은 판정의 규칙만 걸러 낸다. */
+    /**
+     * 호출 전 BLOCK·APPROVAL이 아니면 참. Tool을 실행하지 않은 판정의 규칙만 걸러 낸다. 호출 후 BLOCK은 Tool을 실행했고
+     * 결과만 내보내지 않았다 — 그 규칙은 응답 단계 상태 표(docs/04 §19.1)가 맡는다.
+     */
     private boolean runsToolOrUndecided() {
-        return decision == null || decision.runsTool();
+        return decision == null || decision.runsTool() || decisionStage == DecisionStage.RESPONSE;
+    }
+
+    private boolean releasesResponse() {
+        return decision == PolicyDecision.ALLOW || decision == PolicyDecision.MASK;
     }
 }

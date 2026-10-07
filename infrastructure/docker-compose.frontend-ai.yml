@@ -41,6 +41,8 @@ services:
     environment:
       AI_URL: http://ai-risk:8000
       SPRING_PROFILES_ACTIVE: real-core,real-ai,real-downstream
+      # 문서 Tool의 응답 검사(docs/04 §19). 기본은 꺼짐 — 꺼져 있으면 문서 Tool은 호출 전에 RESPONSE_SCAN_DISABLED다.
+      RESPONSE_SCAN_ENABLED: ${RESPONSE_SCAN_ENABLED:-false}
     depends_on:
       ai-risk:
         condition: service_healthy

@@ -211,6 +211,8 @@ Viewer는 Dashboard와 같은 읽기 전용 범위에서 전체 실행을 조회
 }
 ```
 
+- 응답 단계 시도(§19)에는 `decisionStage: "RESPONSE"`와 `responseScan`(범주별 건수·버전)이 붙는다. 호출 전 시도에는 둘 다
+  없다. 문서 원문은 이 응답에도 없다.
 - `status`는 `RUNNING | COMPLETED | FAILED` 중 하나다. 저장소의 실행 준비 상태 `CREATED`는
   Public 응답에서 `RUNNING`으로 표현한다.
 - `FAILED`는 AuditEvent가 없어도 반환한다. Core가 Agent를 호출하지 못한 실패를 화면에서
@@ -282,6 +284,13 @@ Gateway Body에는 Scenario나 권한 근거를 추가하지 않는다. Tool/Dat
 | `TOOL_SCOPE_ATTACK` | `CUST-1002` | `INCOME_READ` | `[INCOME]` | BLOCK / `TOOL_SCOPE_VIOLATION` 포함 |
 | `DATA_SCOPE_ATTACK` | `CUST-1002` | `CREDIT_SCORE_READ` | `[CREDIT_SCORE, INCOME]` | BLOCK / `DATA_SCOPE_VIOLATION` 포함 |
 | `MANDATE_SCOPE_ATTACK` | `CUST-1003` | `DEBT_READ` | `[DEBT]` | BLOCK / `MANDATE_SCOPE_VIOLATION` 포함 |
+| `DOCUMENT_WITH_PII` | `CUST-1001` | `LOAN_APPLICATION_READ` | `[LOAN_APPLICATION]` | MASK(응답 단계, §19) |
+| `DOCUMENT_CLEAN` | `CUST-1002` | `LOAN_APPLICATION_READ` | `[LOAN_APPLICATION]` | ALLOW(응답 단계) |
+| `DOCUMENT_OTHER_CUSTOMER` | `CUST-1003` | `LOAN_APPLICATION_READ` | `[LOAN_APPLICATION]` | BLOCK / `OTHER_CUSTOMER_DATA_IN_RESPONSE`(응답 단계) |
+
+문서 시나리오 셋(5단계)은 같은 Tool로 고객마다 다른 고정 문서를 읽는다. 세 고객의 Mandate와 대출 심사 Template·EMP-101
+권한에 `LOAN_APPLICATION`이 있어 호출 전 판정은 ALLOW이고, 결과는 응답 검사가 정한다. 공격 셋의 기대 사유는
+`INCOME`·`DEBT`에만 걸려 이 추가의 영향을 받지 않는다.
 
 공격 셋의 `targetConsumerId`가 `CUST-1001`이 아닌 이유는 아래 Fixture 조건에 있다. `CUST-1001`은
 정상 경로용이라 Tool·Data를 모두 허용하므로, 같은 고객을 노리면 `TOOL_SCOPE_ATTACK`이
@@ -337,7 +346,7 @@ Core의 7개 Scenario 지원과 실제 Core Resolver 연결을 확인한 뒤 확
 Simulator는 Scenario를 §5의 Gateway Tool Call로 변환한다. Gateway 응답의 `ALLOW/BLOCK`은
 정책 결과로 그대로 반환하며, Timeout·5xx·본문 누락은 성공이나 `ALLOW`로 바꾸지 않는다.
 Agent는 `requestId`와 `decision`, ALLOW의 `result.tool`·`result.consumerId`가 요청과
-일치하는지와 Tool별 숫자 결과(`creditScore`, `annualIncome`, `totalDebt`)를 검증한다.
+일치하는지와 Tool별 결과(숫자 `creditScore`, `annualIncome`, `totalDebt`, 문서 Tool은 문자열 `documentText`)를 검증한다.
 이는 응답 계약 검사이며 Scope 비교나 발급 여부 증명이 아니다. BLOCK은 비어 있지 않은
 `reasonCodes`를 요구한다. `403 + ALLOW` 또는 금융 결과가 포함된 BLOCK처럼 서로
 모순되는 응답과 잘못된 JSON은 `GATEWAY_RESPONSE_INVALID`로 처리한다.
@@ -779,6 +788,8 @@ GET /internal/v1/agents/{agentId}/behavior-history?window=5m
 BLOCK은 실행되지 않았으므로 `success`가 없다(`null`). 소비자는 이를 `false`로 바꾸지 않는다 — 바꾸면 정상 차단이
 실행 실패로 세진다(`errorRatio5m`, `docs/03-ai-spec.md` §8).
 Gateway는 `caseId`·`tool` 등 맥락이 빠진 행을 AI에 넘기지 않고 `behavior.history.events.dropped`로 센다.
+
+응답 단계 결과(MASK, 호출 후 BLOCK)는 이력에서 바꿔 보낸다(§19.1).
 이 지표는 고유 행 수가 아니라 평가마다 버린 횟수다 — 같은 행이 다음 호출의 5분 창에 다시 들어오면 또 센다.
 
 Gateway와 FastAPI는 Behavior History를 위해 DB를 직접 조회하지 않는다.
@@ -928,7 +939,8 @@ ALLOW로 Downstream까지 간 경우에는 실행 측정값을 함께 보낸다.
 |---|---|
 | `systemOutcome = ERROR` | `errorLocation` 필수, `success = false`, `reasonCodes` 비어 있지 않음 |
 | `decision = ALLOW` + `systemOutcome = COMPLETED` | `success = true` |
-| `decision = BLOCK \| APPROVAL` | `downstreamReached = false`, `responseReleased = false`, 실행 측정값 없음, `reasonCodes` 비어 있지 않음 |
+| `decision = BLOCK \| APPROVAL`, 호출 전 판정 | `downstreamReached = false`, `responseReleased = false`, 실행 측정값 없음, `reasonCodes` 비어 있지 않음 |
+| 응답 단계(`decisionStage = RESPONSE`) | §19.1 상태 표 — MASK, 호출 후 BLOCK, `responseScan` |
 
 `errorLocation`은 `^[A-Z][A-Z0-9_]*$` 형식이다.
 
@@ -1155,6 +1167,7 @@ Tool별 `result` Field:
 CREDIT_SCORE_READ → creditScore
 INCOME_READ       → annualIncome
 DEBT_READ         → totalDebt
+LOAN_APPLICATION_READ → documentText (문자열, 고객별 합성 고정 문서. CUST-1001·1002·1003만 있다)
 ```
 
 ### 오류 응답
@@ -1274,7 +1287,8 @@ Mock Finance는 Scope Status를 계산하거나 `ALLOW/BLOCK`을 결정하지 �
 
 Vue는 PostgreSQL을 직접 조회하지 않는다.
 
-`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `approval`, `error`, `outcomeUnknown`을 반환한다.
+`GET /api/v1/dashboard/summary`는 `total`, `allow`, `block`, `approval`, `mask`, `error`, `outcomeUnknown`을
+반환한다. `block`에는 호출 후 BLOCK도 들어간다(§19.1). 목록 필터 `outcome`은 `MASK`도 받는다.
 `total`은 나머지의 합과 같지 않을 수 있다 — 진행 중인 `PROCESSING`은 `total`에만 들어간다.
 `outcomeUnknown`은 판정이 없으므로 `allow`·`block`에 넣지 않는다.
 
@@ -1384,6 +1398,7 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
 - `occurredAt`은 그 전이의 DB 시각이다. `partitionKey`는 Tool Call이 agentId, 승인이 approvalRequestId다.
 - 원본 Prompt, 금융 응답, 자격 증명, 고객 식별자를 싣지 않는다. 스키마가 닫혀 있어 어느 깊이에도 다른 키가 들어갈 수
   없다.
+- Tool Call 결과에는 판정 `MASK`와 선택 필드 `decisionStage`·`responseScan`(범주별 건수와 버전만)이 있을 수 있다(§19.1).
 - 전달은 **최소 1회**다. 소비자는 `eventId`로 중복을 걸러야 한다.
 - 스키마는 닫혀 있으므로 타입·필드 추가도 호환 변경이 아니다. 소비자를 먼저 배포하고 생산자를 배포한다. 의미가 바뀌면
   `schemaVersion`을 올린다.
@@ -1414,3 +1429,113 @@ Retry가 필요해도 같은 Request ID의 금융 호출이 중복 실행되지 
 
 소비자는 Core의 원천 표(감사·승인·아웃박스)를 직접 조회하지 않는다. 자기 상태(처리 기록·체크포인트)를 두는 저장소는
 가질 수 있다.
+
+---
+
+## 19. 응답 검사 / MASK (5단계)
+
+호출 전 판정(§12)이 ALLOW한 **자유 텍스트 Tool**의 응답을 Agent에 넘기기 전에 검사한다. 탐지기(ai-risk)가 범주별로 찾고,
+응답 정책(OPA `finguard.response`)이 ALLOW·MASK·BLOCK을 정하며, Gateway가 그대로 집행한다. 숫자 Tool은 검사하지 않는다.
+감사·이벤트에는 범주별 건수와 탐지기·응답 정책 버전만 남는다. 원문, 탐지 값, 위치는 어디에도 남지 않는다.
+
+### 19.1 상태 표
+
+모든 계약(`execution-outcome`, `audit-event`, 이벤트 v2)과 Core 검증이 이 표를 따른다. `decisionStage`가 없으면 `REQUEST`다.
+
+| 경우 | decision | decisionStage | systemOutcome | downstreamReached | responseReleased | success | latencyMs | recordsRead | responseScan |
+|---|---|---|---|---|---|---|---|---|---|
+| 호출 전 BLOCK·APPROVAL | BLOCK·APPROVAL | REQUEST | COMPLETED | false | false | 없음 | 없음 | 없음 | 금지 |
+| 검사 스위치 꺼짐(호출 전) | 없음 | REQUEST | ERROR `RESPONSE_SCAN_DISABLED`, `GATEWAY` | false | false | false | 없음 | 없음 | 금지 |
+| 하위 호출 실패 | ALLOW | REQUEST | ERROR(§13.1) | 기존 | false | false | 기존 | 없음 | 금지 |
+| 민감정보 없음 | ALLOW | RESPONSE | COMPLETED | true | true | true | 필수 | 1 | 필수 |
+| 개인정보 | **MASK** | RESPONSE | COMPLETED | true | true | true | 필수 | 1 | 필수 |
+| 다른 고객 정보 | BLOCK | RESPONSE | COMPLETED | true | **false** | false | 필수 | **금지** | 필수 |
+| 검사 실패·시간 초과 | ALLOW | RESPONSE | ERROR | true | false | false | 허용 | 없음 | **금지** |
+
+- MASK는 응답 단계에서 완료된 결과에만 있다. 사유 코드가 비어 있으면 안 된다.
+- APPROVAL은 언제나 호출 전 판정이다.
+- 검사가 실패하면 믿을 수 있는 건수가 없으므로 `responseScan`을 남기지 않는다.
+- 응답을 내보낸 응답 단계 결과(ALLOW·MASK)는 `recordsRead = 1`이다. 응답 단계 ERROR에는 `recordsRead`가 없다.
+- 스위치 꺼짐(`RESPONSE_SCAN_DISABLED`)은 판정 없이, 호출 전 단계로, `errorLocation = GATEWAY`, `downstreamReached = false`,
+  실행 측정값 없이 기록된다.
+- `PROCESSING`·`OUTCOME_UNKNOWN` 행과 이벤트에는 `decisionStage`·`responseScan`을 넣을 수 없다. 늦은 결과로 해소될 때 위
+  표를 따른다.
+- 이벤트 v2는 이 표 가운데 `decision`·`systemOutcome`·`reasonCodes`·`decisionStage`·`responseScan`만 싣는다(도달·공개·측정값
+  열은 이벤트에 없다).
+- Core는 검사 증거를 jsonb가 아닌 칸 여섯 개(두 버전, 네 건수)로 저장하고, 버전 모양·건수 범위·위 표의 행을 DB
+  제약으로도 막는다(V14).
+- 행동 이력(§9)으로 내보낼 때 MASK는 ALLOW로, 응답 단계 BLOCK은 실행 측정값(`success`·`latencyMs`) 없는 BLOCK으로
+  바꿔 보낸다. 행동 위험 계약(§10)은 그대로다.
+- 최종 판정은 하나다. `reasonCodes`는 두 단계 사유의 합집합, `severity`는 더 높은 쪽, `riskFlagged`는 OR이다. `policyVersion`은
+  호출 전 정책 버전이고, 응답 정책 버전은 `responseScan.policyVersion`에 있다.
+
+```json
+"decisionStage": "RESPONSE",
+"responseScan": {
+  "detectorVersion": "response-scan-1",
+  "policyVersion": "response-policy-1",
+  "counts": { "RRN": 1, "ACCOUNT_NUMBER": 0, "PHONE_NUMBER": 1, "OTHER_CUSTOMER": 0 }
+}
+```
+
+`counts`는 정확히 네 키(다른 키 금지)이고 각 값은 0~256의 정수다. 두 버전은 `^response-scan-[0-9]{1,4}$`,
+`^response-policy-[0-9]{1,4}$` 형식만 허용한다(감사로 자유 텍스트가 들어오는 통로를 막는다).
+
+사유 코드: `RRN_MASKED`, `ACCOUNT_NUMBER_MASKED`, `PHONE_NUMBER_MASKED`, `OTHER_CUSTOMER_DATA_IN_RESPONSE`,
+`RESPONSE_SCAN_UNAVAILABLE`, `RESPONSE_SCAN_DISABLED`, `RESPONSE_TOO_LARGE`, `MASKING_FAILED`.
+
+### 19.2 탐지기 — `POST /internal/v1/risk/response-scan` (ai-risk)
+
+요청 `{"requestId", "tool", "targetConsumerId", "text"}`, 응답
+`{"detectorVersion", "findings": [{"category", "start", "end"}], "counts": {...}}`. 인증은 §10과 같은 서비스 Credential이다.
+
+- 위치는 **UTF-16 code unit 반열림 구간** `[start, end)`다. Java String 인덱스와 같다. Python은
+  `len(text[:i].encode("utf-16-le")) // 2`로 바꾼다. 외톨이 서로게이트가 있는 텍스트는 422다.
+- 응답 계약은 엄격하다(Gateway가 하나라도 어기면 결과를 내보내지 않는다): `findings`는 최대 256개, 범주는 네 개 중 하나,
+  `0 ≤ start < end ≤ 텍스트 길이`, `start` 순으로 정렬되고 서로 겹치지 않는다. 범주별 `findings` 개수는 `counts`와 같다.
+  `counts`는 네 키 정확히, 중복 키는 거부한다. 서로게이트 쌍을 가르는 끝점은 거부한다.
+- 겹치거나 맞닿은 일치는 하나로 합치고, 범주는 `OTHER_CUSTOMER > RRN > PHONE_NUMBER > ACCOUNT_NUMBER` 중 가장 높은 것이다.
+- 오류: 형식 422, 크기 초과(16 KiB) 413, 내부 실패 503 `RESPONSE_SCAN_UNAVAILABLE`. Gateway는 모두 실패로 보고 결과를
+  내보내지 않는다.
+- 탐지기는 본문과 탐지 값을 로그에 남기지 않는다(요청 id, 범주별 건수, 처리 시간만).
+- 교차 언어 사례: `contracts/response-scan/fixtures/cases.json`. ai-risk와 Gateway 테스트가 같은 파일을 읽는다.
+
+**탐지 범위(정해진 형식만).**
+- 주민등록번호: 6자리 + (없음 · `-` · 공백 하나) + 7자리. 앞 6자리가 유효한 날짜이고 7번째가 1~8이다. 체크섬은 보지
+  않는다(2020년 10월 이후 번호에는 검증 숫자가 없다).
+- 전화번호: 휴대 `01[016789]`, 유선 `0[2-6][0-9]?`. 두 구분자 자리는 각각 독립적으로 `-`·`.`·공백 하나 중 하나이며
+  서로 달라도 된다(예: `010-1234.5678`). 구분자 없음은 휴대만, 양쪽 모두 허용한다.
+- 계좌번호: `-`로 이은 숫자 묶음(자릿수 제한 없음)의 연속 구간에서, 연속된 3~4개 묶음의 숫자 합이 10~14자리인 경우가
+  하나라도 있으면 그 구간 전체(앞뒤로 더 붙은 묶음까지 포함해 `-`로 이어진 전체)를 가린다. 그 구간이 날짜 모양
+  (`(19|20)\d{2}-\d{2}-\d{2}`로 시작)이면 전체를 제외한다. 보수적 규칙이며 정확한 계좌 식별을 주장하지 않는다.
+- 다른 고객: `CUST-\d{4}` 중 대상 고객이 아닌 것.
+- 일치 앞뒤가 숫자나 영문자이면 일치로 보지 않는다.
+
+**알려진 한계.** 괄호 지역번호, 숫자 사이 여러 칸 공백, 전각·한글 숫자는 놓친다. 식별자 없이 드러나는 다른 고객의
+정보(예: 다른 사람의 주민등록번호)는 다른 고객으로 판단하지 못하고 개인정보로 가린다. 문맥 없는 숫자 묶음은 계좌로
+잘못 가리거나 놓칠 수 있다.
+
+### 19.3 응답 정책 — `/v1/data/finguard/response/decision` (OPA)
+
+입력은 건수뿐이다: `{"requestId", "tool", "counts": {...}, "detectorVersion"}`. 출력 모양은 §12와 같다.
+
+- `OTHER_CUSTOMER > 0` → BLOCK `OTHER_CUSTOMER_DATA_IN_RESPONSE`, HIGH, riskFlagged true.
+- 그 밖에 건수 합 > 0 → MASK. 걸린 범주마다 `*_MASKED` 사유, LOW.
+- 그 밖 → ALLOW, 사유 없음.
+- 입력 모양이 틀리면 판정을 만들지 않는다.
+
+Gateway는 응답 단계 판정을 따로 검증한다. 허용 값은 ALLOW·MASK·BLOCK이고, MASK·BLOCK은 사유가 있어야 하며, 판정이
+건수와 모순되면(예: 건수 합이 0보다 큰데 ALLOW) 결과를 내보내지 않는다. Gateway가 판정을 지어내지 않는다.
+
+### 19.4 Gateway 집행
+
+- 하위 응답 본문은 64 KiB까지만 읽는다. 하위 응답의 requestId·tool·consumerId는 요청과 같아야 하고, result는 정확히
+  `{"documentText": string}`이다. `documentText`가 16 KiB(UTF-8)를 넘으면 `RESPONSE_TOO_LARGE`다.
+- 검사 단계 전체 예산은 2000 ms다(탐지기 1500 ms 포함). 넘으면 결과를 내보내지 않는다. 늦게 온 응답은 버린다.
+- 가린 텍스트는 건드리지 않은 구간과 범주 표시(`[주민등록번호]`, `[계좌번호]`, `[전화번호]`)를 이어 붙여 새로 만든다.
+  Agent에게 가는 결과는 믿을 수 있는 필드로만 만든다: `{tool, consumerId, documentText}`.
+- 같은 요청 재전송에 쓰는 캐시에는 Agent에게 실제로 나간 응답만 저장한다. 검사 전 원문은 저장하지 않는다.
+- 스위치 `finguard.response-scan.enabled`(기본 false)가 꺼져 있으면 자유 텍스트 Tool은 호출하기 전에
+  `RESPONSE_SCAN_DISABLED`로 끝난다.
+- **내용 검사는 fail-closed, 감사 전달은 최선 노력이다.** 결과 기록이 실패해도 Agent 응답은 이미 정해진 대로 나가고, 감사
+  행은 `OUTCOME_UNKNOWN` 경로(§11)를 탄다.

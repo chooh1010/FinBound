@@ -58,7 +58,8 @@ class DemoSeedTest {
                         String.class);
 
         assertThat(scope).isEqualTo("ALL");
-        assertThat(tools).containsExactlyInAnyOrder("CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ");
+        assertThat(tools).containsExactlyInAnyOrder(
+                "CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ");
     }
 
     @Test
@@ -107,14 +108,16 @@ class DemoSeedTest {
 
         assertThat(mandateConsumers)
                 .containsExactlyInAnyOrder("CUST-1001", "CUST-1002", "CUST-1003");
+        // 세 고객 모두 LOAN_APPLICATION을 허용한다 — 응답 검사 시나리오(DOCUMENT_*, docs/04 §19)가 고객마다 다른 고정
+        // 문서를 읽는다. 공격 기대 사유는 INCOME·DEBT에만 걸려 있어 영향이 없다.
         assertThat(allowedDataOf("CUST-1001"))
-                .containsExactlyInAnyOrder("CREDIT_SCORE", "INCOME", "DEBT");
+                .containsExactlyInAnyOrder("CREDIT_SCORE", "INCOME", "DEBT", "LOAN_APPLICATION");
         assertThat(allowedDataOf("CUST-1002"))
                 .as("TOOL/DATA 공격용 — INCOME이 빠져야 한다")
-                .containsExactlyInAnyOrder("CREDIT_SCORE", "DEBT");
+                .containsExactlyInAnyOrder("CREDIT_SCORE", "DEBT", "LOAN_APPLICATION");
         assertThat(allowedDataOf("CUST-1003"))
                 .as("MANDATE 공격용 — DEBT가 빠져야 한다")
-                .containsExactlyInAnyOrder("CREDIT_SCORE", "INCOME");
+                .containsExactlyInAnyOrder("CREDIT_SCORE", "INCOME", "LOAN_APPLICATION");
     }
 
     private List<String> allowedDataOf(String consumerId) {
@@ -182,7 +185,8 @@ class DemoSeedTest {
 
         assertThat(authorityStatus).isEqualTo("ACTIVE");
         assertThat(currentAuthorityVersion).isGreaterThan(previousAuthorityVersion);
-        assertThat(tools).containsExactlyInAnyOrder("CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ");
+        assertThat(tools).containsExactlyInAnyOrder(
+                "CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ");
         assertThat(caseStatus).isEqualTo("ACTIVE");
         assertThat(caseConsumer).isEqualTo("CUST-1001");
     }

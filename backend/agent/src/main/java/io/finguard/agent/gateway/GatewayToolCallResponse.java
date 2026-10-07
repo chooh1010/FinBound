@@ -15,4 +15,11 @@ public record GatewayToolCallResponse(
     public GatewayToolCallResponse {
         reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
     }
+
+    /** 결과(금융 값, 문서 텍스트)는 빼고 찍는다. 기본 toString은 result를 통째로 싣는다. */
+    @Override
+    public String toString() {
+        return "GatewayToolCallResponse[requestId=" + requestId + ", decision=" + decision
+                + ", reasonCodes=" + reasonCodes + ", result=" + (result == null ? "absent" : "present") + "]";
+    }
 }

@@ -35,6 +35,11 @@ finguard:
     base-url: ${OPA_URL:http://localhost:8181}
   mock-finance:
     base-url: ${MOCK_FINANCE_URL:http://localhost:8083}
+  response-scan:
+    # 자유 텍스트 Tool의 응답 검사(docs/04 §19). 꺼져 있으면 그 Tool은 호출 전에 RESPONSE_SCAN_DISABLED로 끝난다.
+    enabled: ${RESPONSE_SCAN_ENABLED:false}
+    # 탐지기 주소. 비우면 finguard.ai.base-url(ai-risk)을 쓴다.
+    base-url: ${RESPONSE_SCAN_URL:${finguard.ai.base-url}}
   timeouts:
     core-ms: 800
     ai-ms: 1500

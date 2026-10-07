@@ -118,6 +118,37 @@ class AlertWorkerTest {
         assertThat(jdbc.queryForObject("select after_seq from checkpoints", Long.class)).isEqualTo(7);
     }
 
+    /**
+     * 응답 단계 결과를 단계별로 본다. 위험 표시 없는 MASK는 어느 카운터에도 들지 않는다. 위험 표시된 MASK는 위험 표시 급증에만
+     * 든다. 호출 후 BLOCK(다른 고객 정보)은 호출 전 BLOCK과 같이 차단 급증에 든다.
+     */
+    @Test
+    void responseStageResultsCountByDecisionAndRiskFlag() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            add(responseStage("MASK", false, "2026-10-07T12:00:0" + i + "Z"));
+        }
+        serve();
+        drain();
+        assertThat(alerts()).isEmpty();
+        assertThat(count("alert_counters")).isZero();
+
+        for (int i = 0; i < 3; i++) {
+            add(responseStage("MASK", true, "2026-10-07T12:00:1" + i + "Z"));
+        }
+        serve();
+        drain();
+        assertThat(alerts()).containsExactly("RISK_FLAG_BURST:3");
+
+        for (int i = 0; i < 5; i++) {
+            add(responseStage("BLOCK", true, "2026-10-07T12:00:2" + i + "Z"));
+        }
+        serve();
+        drain();
+        assertThat(alerts()).containsExactly("RISK_FLAG_BURST:3", "BLOCK_BURST:5");
+        assertThat(count("consumed_events")).isEqualTo(13);
+        assertThat(worker.haltReason()).isNull();
+    }
+
     @Test
     void unknownOutcomeAlertsImmediately() throws Exception {
         add(toolCall("TOOL_CALL_OUTCOME_UNKNOWN", null, null, "2026-10-07T12:00:00Z"));
@@ -428,6 +459,23 @@ class AlertWorkerTest {
             payload.put("detectedAt", occurredAt);
         }
         return envelope(type, "TOOL_CALL", "AUD-1", "LOAN-AGENT-01", occurredAt, payload);
+    }
+
+    /** 응답 단계 결과. 계약(docs/04 §19.1)대로 단계와 건수·버전만 싣는다. */
+    private static String responseStage(String decision, boolean riskFlagged, String occurredAt) throws Exception {
+        Map<String, Object> event = JSON.readValue(
+                toolCall("TOOL_CALL_FINALIZED", decision, riskFlagged, occurredAt),
+                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() { });
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) event.get("payload");
+        boolean block = decision.equals("BLOCK");
+        payload.put("reasonCodes", List.of(block ? "OTHER_CUSTOMER_DATA_IN_RESPONSE" : "RRN_MASKED"));
+        payload.put("severity", block ? "HIGH" : "LOW");
+        payload.put("decisionStage", "RESPONSE");
+        payload.put("responseScan", Map.of(
+                "detectorVersion", "response-scan-1", "policyVersion", "response-policy-1",
+                "counts", Map.of("RRN", 1, "ACCOUNT_NUMBER", 0, "PHONE_NUMBER", 0, "OTHER_CUSTOMER", block ? 1 : 0)));
+        return JSON.writeValueAsString(event);
     }
 
     private static String approval(String type, String occurredAt) throws Exception {

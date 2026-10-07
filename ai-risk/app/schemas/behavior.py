@@ -33,12 +33,14 @@ class FinancialTool(StrEnum):
     CREDIT_SCORE_READ = "CREDIT_SCORE_READ"
     INCOME_READ = "INCOME_READ"
     DEBT_READ = "DEBT_READ"
+    LOAN_APPLICATION_READ = "LOAN_APPLICATION_READ"
 
 
 class FinancialDataType(StrEnum):
     CREDIT_SCORE = "CREDIT_SCORE"
     INCOME = "INCOME"
     DEBT = "DEBT"
+    LOAN_APPLICATION = "LOAN_APPLICATION"
 
 
 class TimezoneAwareModel(ContractModel):

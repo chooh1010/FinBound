@@ -538,6 +538,397 @@ describe('real Core API adapter', () => {
     expect(result.attempts[0].responseReleased).toBeNull()
   })
 
+  it('accepts a response-stage MASK attempt and describes it as masked, not blocked', async () => {
+    // MASK는 응답 검사가 개인정보를 가리고 내보낸 판정이다. 호출 전 판정이 아니라 응답 완료다(docs/04 §19.1).
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-MASK', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-MASK',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-MASK',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          targetConsumerId: 'CUST-1001',
+          requestedData: ['LOAN_APPLICATION'],
+          decision: 'MASK',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['RRN_MASKED'],
+          downstreamReached: true,
+          responseReleased: true,
+          responseScan: {
+            detectorVersion: 'response-scan-1',
+            policyVersion: 'response-policy-1',
+            counts: { RRN: 1, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 },
+          },
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.attempts[0].decision).toBe('MASK')
+    expect(result.attempts[0].decisionStage).toBe('RESPONSE')
+    expect(result.attempts[0].responseScan).toMatchObject({ detectorVersion: 'response-scan-1' })
+    expect(result.attempts[0].description).toContain('가리고 제공')
+    expect(result.attempts[0].description).not.toContain('차단')
+    expect(result.resultItems).toContain('개인정보 가림 제공 1건')
+  })
+
+  it('describes a response-stage BLOCK as a withheld result, not a pre-call block', async () => {
+    // 다른 고객 정보가 응답에 있으면 조회는 끝났지만 결과를 내보내지 않는다(docs/04 §19.1).
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-RESPONSE-BLOCK', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-RESPONSE-BLOCK',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-RESPONSE-BLOCK',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          targetConsumerId: 'CUST-1003',
+          requestedData: ['LOAN_APPLICATION'],
+          decision: 'BLOCK',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['OTHER_CUSTOMER_DATA_IN_RESPONSE'],
+          downstreamReached: true,
+          responseReleased: false,
+          responseScan: {
+            detectorVersion: 'response-scan-1',
+            policyVersion: 'response-policy-1',
+            counts: { RRN: 0, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 1 },
+          },
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.attempts[0].description).toContain('조회는 완료')
+    expect(result.attempts[0].description).toContain('제공하지 않았습니다')
+    expect(result.attempts[0].description).not.toContain('조회 전에 차단')
+  })
+
+  it('keeps a request-stage BLOCK description unchanged when decisionStage is absent', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-REQUEST-BLOCK', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-REQUEST-BLOCK',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-REQUEST-BLOCK',
+          requestedTool: 'INCOME_READ',
+          targetConsumerId: 'CUST-2099',
+          requestedData: ['INCOME'],
+          decision: 'BLOCK',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['CASE_SCOPE_VIOLATION'],
+          downstreamReached: false,
+          responseReleased: false,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.attempts[0].decisionStage).toBe('REQUEST')
+    expect(result.attempts[0].description).toContain('조회 전에 차단')
+  })
+
+  it.each([
+    ['a non-pattern detector version', { detectorVersion: 'bad', policyVersion: 'response-policy-1', counts: { RRN: 0, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 } }],
+    ['a missing count category', { detectorVersion: 'response-scan-1', policyVersion: 'response-policy-1', counts: { RRN: 0, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0 } }],
+    ['an out-of-range count', { detectorVersion: 'response-scan-1', policyVersion: 'response-policy-1', counts: { RRN: 999, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 } }],
+  ])('rejects a MASK attempt with %s', async (_label, responseScan) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-BAD-SCAN', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-BAD-SCAN',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-BAD-SCAN',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          decision: 'MASK',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['RRN_MASKED'],
+          responseScan,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  it.each([
+    ['a MASK decision at the request stage', { decision: 'MASK', decisionStage: 'REQUEST' }],
+    ['an APPROVAL decision at the response stage', { decision: 'APPROVAL', decisionStage: 'RESPONSE', responseScan: { detectorVersion: 'response-scan-1', policyVersion: 'response-policy-1', counts: { RRN: 0, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 } } }],
+    ['a completed response-stage attempt without responseScan', { decision: 'ALLOW', decisionStage: 'RESPONSE' }],
+    ['a completed request-stage attempt carrying responseScan', { decision: 'ALLOW', decisionStage: 'REQUEST', responseScan: { detectorVersion: 'response-scan-1', policyVersion: 'response-policy-1', counts: { RRN: 0, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 } } }],
+  ])('rejects a decision/stage/scan combination forbidden by the state table: %s', async (_label, shape) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-BAD-SHAPE', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-BAD-SHAPE',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-BAD-SHAPE',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: [],
+          ...shape,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  const RESPONSE_SCAN = {
+    detectorVersion: 'response-scan-1',
+    policyVersion: 'response-policy-1',
+    counts: { RRN: 1, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 },
+  }
+
+  it.each([
+    ['a RESPONSE/ERROR attempt that claims a released response', {
+      decision: 'ALLOW',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'ERROR',
+      downstreamReached: true,
+      responseReleased: true,
+    }],
+    ['a RESPONSE/ERROR attempt with no decision at all', {
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'ERROR',
+      downstreamReached: true,
+      responseReleased: false,
+    }],
+    ['a RESPONSE/MASK attempt that was not released', {
+      decision: 'MASK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: true,
+      responseReleased: false,
+      responseScan: RESPONSE_SCAN,
+    }],
+    ['a RESPONSE/MASK attempt that never reached the downstream tool', {
+      decision: 'MASK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: false,
+      responseReleased: true,
+      responseScan: RESPONSE_SCAN,
+    }],
+    ['a RESPONSE/BLOCK attempt that claims a released response', {
+      decision: 'BLOCK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: true,
+      responseReleased: true,
+      responseScan: RESPONSE_SCAN,
+    }],
+    ['a RESPONSE/BLOCK attempt that never reached the downstream tool', {
+      decision: 'BLOCK',
+      decisionStage: 'RESPONSE',
+      systemOutcome: 'COMPLETED',
+      downstreamReached: false,
+      responseReleased: false,
+      responseScan: RESPONSE_SCAN,
+    }],
+  ])('rejects a contradictory response-stage state table combination: %s', async (_label, shape) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-STATE-TABLE', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-STATE-TABLE',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-STATE-TABLE',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          reasonCodes: ['RRN_MASKED'],
+          ...shape,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  it('accepts a response-stage scan failure as completed with no released result', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-SCAN-FAILED', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-SCAN-FAILED',
+        status: 'FAILED',
+        attempts: [{
+          requestId: 'REQ-SCAN-FAILED',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          decision: 'ALLOW',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'ERROR',
+          reasonCodes: ['RESPONSE_SCAN_UNAVAILABLE'],
+          downstreamReached: true,
+          responseReleased: false,
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    const result = await finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })
+
+    expect(result.attempts).toHaveLength(1)
+    expect(result.attempts[0].decisionStage).toBe('RESPONSE')
+    expect(result.attempts[0].systemOutcome).toBe('ERROR')
+    expect(result.attempts[0].responseReleased).toBe(false)
+  })
+
+  it('rejects a response-scan object carrying an extra field', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-EXTRA-FIELD', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-EXTRA-FIELD',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-EXTRA-FIELD',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          decision: 'MASK',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['RRN_MASKED'],
+          responseScan: {
+            detectorVersion: 'response-scan-1',
+            policyVersion: 'response-policy-1',
+            counts: { RRN: 1, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 },
+            documentText: 'leaked',
+          },
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  it('rejects a non-string response-scan version even if it coincidentally matches the pattern as text', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-ARRAY-VERSION', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-ARRAY-VERSION',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-ARRAY-VERSION',
+          requestedTool: 'LOAN_APPLICATION_READ',
+          decision: 'MASK',
+          decisionStage: 'RESPONSE',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: ['RRN_MASKED'],
+          responseScan: {
+            detectorVersion: ['response-scan-1'],
+            policyVersion: 'response-policy-1',
+            counts: { RRN: 1, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 0, OTHER_CUSTOMER: 0 },
+          },
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  it('rejects an attempt with an unrecognized decision stage', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ agentRunId: 'RUN-BAD-STAGE', status: 'RUNNING' }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentEffectivePermission: { allowedTools: [], allowedData: [] },
+        withheldTools: [],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        agentRunId: 'RUN-BAD-STAGE',
+        status: 'COMPLETED',
+        attempts: [{
+          requestId: 'REQ-BAD-STAGE',
+          requestedTool: 'CREDIT_SCORE_READ',
+          decision: 'ALLOW',
+          decisionStage: 'UNEXPECTED',
+          systemOutcome: 'COMPLETED',
+          reasonCodes: [],
+        }],
+      }))
+    configureFinboundApi({ mode: 'real', credential: 'operator', fetchImpl })
+
+    await expect(finboundApi.executeAgentTask({ workId: 'NEW_LOAN' })).rejects.toMatchObject({
+      code: 'CORE_API_INVALID_RESPONSE',
+    })
+  })
+
+  it('passes decisionStage and responseScan through the audit event mapper', () => {
+    const mapped = mapAuditEvent({
+      auditEventId: 'AUD-RESPONSE-SCAN',
+      status: 'COMPLETED',
+      decision: 'MASK',
+      decisionStage: 'RESPONSE',
+      reasonCodes: ['PHONE_NUMBER_MASKED'],
+      responseScan: {
+        detectorVersion: 'response-scan-2',
+        policyVersion: 'response-policy-3',
+        counts: { RRN: 0, ACCOUNT_NUMBER: 0, PHONE_NUMBER: 2, OTHER_CUSTOMER: 0 },
+      },
+    })
+
+    expect(mapped.decisionStage).toBe('RESPONSE')
+    expect(mapped.responseScan.counts.PHONE_NUMBER).toBe(2)
+  })
+
+  it('defaults an audit event without a decision stage to a request-stage decision', () => {
+    const mapped = mapAuditEvent({ auditEventId: 'AUD-DEFAULT-STAGE', status: 'COMPLETED', decision: 'ALLOW' })
+
+    expect(mapped.decisionStage).toBe('REQUEST')
+    expect(mapped.responseScan).toBeNull()
+  })
+
   it('never derives unavailable backend risk fields as safe values', () => {
     const mapped = mapAuditEvent({ auditEventId: 'AUD-1', status: 'PROCESSING' })
 

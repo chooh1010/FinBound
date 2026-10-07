@@ -20,3 +20,9 @@ dependencies {
     testCompileOnly("org.projectlombok:lombok")
     testAnnotationProcessor("org.projectlombok:lombok")
 }
+
+tasks.test {
+    // ResponseInspectorTest reads the cross-language cases in contracts/response-scan.
+    systemProperty("finguard.repository.root", rootProject.projectDir.absolutePath)
+    inputs.dir(rootProject.file("contracts"))
+}

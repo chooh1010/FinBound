@@ -230,7 +230,9 @@ public class AuditOutcomeService {
                     request.riskFlagged(),
                     request.policyVersion(),
                     request.completedAt(),
-                    request.policyInput() == null ? null : request.policyInput().toDomain());
+                    request.policyInput() == null ? null : request.policyInput().toDomain(),
+                    request.decisionStage(),
+                    request.responseScan() == null ? null : request.responseScan().toDomain());
         } catch (IllegalArgumentException exception) {
             throw AuditOperationException.invalidOutcome();
         }

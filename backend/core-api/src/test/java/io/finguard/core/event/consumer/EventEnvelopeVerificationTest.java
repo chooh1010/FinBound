@@ -3,10 +3,15 @@ package io.finguard.core.event.consumer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,6 +46,28 @@ class EventEnvelopeVerificationTest {
         assertThat(verify(eventJson).get("eventType").asText())
                 .isEqualTo("APPROVAL_REQUESTED");
     }
+
+    /** 계약이 유효하다고 한 이벤트는 모두 받는다. 읽는 쪽이 생산자보다 먼저 새 판정·필드(MASK, 응답 단계)를 받아야 한다. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("validContractEvents")
+    void everyValidContractEventPasses(String fixture) throws IOException {
+        String eventJson = Files.readString(CONTRACT_EVENTS.resolve(fixture));
+
+        assertThat(verify(eventJson).get("eventId").asText()).isNotBlank();
+    }
+
+    static Stream<String> validContractEvents() throws IOException {
+        try (Stream<Path> files = Files.list(CONTRACT_EVENTS)) {
+            return files.map(path -> path.getFileName().toString())
+                    .filter(name -> name.endsWith(".valid.json"))
+                    .sorted()
+                    .toList()
+                    .stream();
+        }
+    }
+
+    static final Path CONTRACT_EVENTS = Path.of(
+            System.getProperty("finguard.repository.root"), "contracts", "events", "fixtures");
 
     // 애노테이션 값은 상수여야 하므로 그대로 적는다.
     static final String ENVELOPE_UNKNOWN_TYPE =

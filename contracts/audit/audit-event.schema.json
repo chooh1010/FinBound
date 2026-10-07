@@ -53,10 +53,16 @@
     "riskFlagged": { "type": "boolean" },
     "decision": {
       "type": "string",
-      "enum": ["ALLOW", "BLOCK", "APPROVAL"]
+      "enum": ["ALLOW", "BLOCK", "APPROVAL", "MASK"]
     },
     "reasonCodes": { "$ref": "#/$defs/reasonCodes" },
     "policyVersion": { "$ref": "#/$defs/nonEmptyIdentifier" },
+    "decisionStage": {
+      "$comment": "Where the final decision was made: REQUEST (before the call, the only stage before stage 5) or RESPONSE (after the call, on the scanned response). Absent means REQUEST.",
+      "type": "string",
+      "enum": ["REQUEST", "RESPONSE"]
+    },
+    "responseScan": { "$ref": "#/$defs/responseScan" },
     "approvalRequestId": {
       "$comment": "The approval consumed by this call (stage 4a). Core writes it at context resolve, before the policy runs, so any status can carry it: the row may still be PROCESSING, fail before the policy (ERROR), become OUTCOME_UNKNOWN, or end ALLOW/BLOCK.",
       "$ref": "#/$defs/nonEmptyIdentifier"
@@ -92,6 +98,121 @@
   },
   "allOf": [
     {
+      "$comment": "Stage 5 state table (docs/04 §11.1). APPROVAL is always a request-stage decision.",
+      "if": {
+        "properties": { "decision": { "const": "APPROVAL" } },
+        "required": ["decision"]
+      },
+      "then": { "not": { "properties": { "decisionStage": { "const": "RESPONSE" } }, "required": ["decisionStage"] } }
+    },
+    {
+      "$comment": "A response-stage outcome reached the policy and the downstream: it always has a decision and reached the tool.",
+      "if": {
+        "properties": { "decisionStage": { "const": "RESPONSE" } },
+        "required": ["decisionStage"]
+      },
+      "then": {
+        "required": ["decision", "downstreamReached"],
+        "properties": { "downstreamReached": { "const": true } }
+      }
+    },
+    {
+      "$comment": "MASK released a masked response: only after the call, only completed, always with reasons and scan evidence.",
+      "if": {
+        "properties": { "decision": { "const": "MASK" } },
+        "required": ["decision"]
+      },
+      "then": {
+        "required": ["decisionStage", "reasonCodes", "responseScan"],
+        "properties": {
+          "decisionStage": { "const": "RESPONSE" },
+          "status": { "const": "COMPLETED" },
+          "reasonCodes": { "$ref": "#/$defs/nonEmptyReasonCodes" }
+        }
+      }
+    },
+    {
+      "$comment": "A response-stage BLOCK ran the tool and withheld the result: reached, not released, failed for the caller, measured, nothing read out.",
+      "if": {
+        "properties": {
+          "decision": { "const": "BLOCK" },
+          "decisionStage": { "const": "RESPONSE" }
+        },
+        "required": ["decision", "decisionStage"]
+      },
+      "then": {
+        "required": ["reasonCodes", "success", "latencyMs", "responseReleased"],
+        "properties": {
+          "status": { "const": "COMPLETED" },
+          "reasonCodes": { "$ref": "#/$defs/nonEmptyReasonCodes" },
+          "responseReleased": { "const": false },
+          "success": { "const": false }
+        },
+        "not": { "required": ["recordsRead"] }
+      }
+    },
+    {
+      "$comment": "Scan evidence exists exactly when the response stage completed. A failed scan has no counts to trust, so none are recorded.",
+      "if": {
+        "properties": {
+          "decisionStage": { "const": "RESPONSE" },
+          "status": { "const": "COMPLETED" }
+        },
+        "required": ["decisionStage", "status"]
+      },
+      "then": { "required": ["responseScan", "latencyMs"] },
+      "else": { "not": { "required": ["responseScan"] } }
+    },
+    {
+      "$comment": "A released response-stage result read exactly one document.",
+      "if": {
+        "properties": {
+          "decision": { "enum": ["ALLOW", "MASK"] },
+          "decisionStage": { "const": "RESPONSE" },
+          "status": { "const": "COMPLETED" }
+        },
+        "required": ["decision", "decisionStage", "status"]
+      },
+      "then": {
+        "required": ["recordsRead"],
+        "properties": { "recordsRead": { "const": 1 } }
+      }
+    },
+    {
+      "$comment": "A failed response-stage scan released nothing, so nothing was read out.",
+      "if": {
+        "properties": {
+          "decisionStage": { "const": "RESPONSE" },
+          "status": { "const": "ERROR" }
+        },
+        "required": ["decisionStage", "status"]
+      },
+      "then": { "not": { "required": ["recordsRead"] } }
+    },
+    {
+      "$comment": "Scan switch off: the gateway stopped before the policy and before the call (docs/04 §19.1).",
+      "if": {
+        "properties": { "reasonCodes": { "contains": { "const": "RESPONSE_SCAN_DISABLED" } } },
+        "required": ["reasonCodes"]
+      },
+      "then": {
+        "required": ["errorLocation", "downstreamReached"],
+        "properties": {
+          "status": { "const": "ERROR" },
+          "errorLocation": { "const": "GATEWAY" },
+          "downstreamReached": { "const": false }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["decision"] },
+            { "properties": { "decisionStage": { "const": "RESPONSE" } }, "required": ["decisionStage"] },
+            { "required": ["latencyMs"] },
+            { "required": ["recordsRead"] }
+          ]
+        }
+      }
+    },
+    {
       "$comment": "OUTCOME_UNKNOWN is written by Core only. The outcome never arrived, so no outcome field may be invented (docs/06 §10).",
       "if": {
         "properties": { "status": { "const": "OUTCOME_UNKNOWN" } },
@@ -116,6 +237,8 @@
             { "required": ["severity"] },
             { "required": ["riskFlagged"] },
             { "required": ["policyVersion"] },
+            { "required": ["decisionStage"] },
+            { "required": ["responseScan"] },
             { "required": ["behaviorRisk"] },
             { "required": ["behaviorRiskLevel"] },
             { "required": ["behaviorFeatureVersion"] },
@@ -126,7 +249,7 @@
       }
     },
     {
-      "$comment": "A start record that was never declared unknown carries neither time.",
+      "$comment": "A start record that was never declared unknown carries neither time, and has no outcome stage yet.",
       "if": {
         "properties": { "status": { "const": "PROCESSING" } },
         "required": ["status"]
@@ -135,7 +258,9 @@
         "not": {
           "anyOf": [
             { "required": ["outcomeUnknownDetectedAt"] },
-            { "required": ["outcomeResolvedAt"] }
+            { "required": ["outcomeResolvedAt"] },
+            { "required": ["decisionStage"] },
+            { "required": ["responseScan"] }
           ]
         }
       }
@@ -202,10 +327,11 @@
       "then": { "required": ["severity", "riskFlagged"] }
     },
     {
-      "$comment": "BLOCK and APPROVAL never ran the tool: no downstream, no response, no execution measurements.",
+      "$comment": "A request-stage BLOCK or APPROVAL never ran the tool: no downstream, no response, no execution measurements.",
       "if": {
         "properties": { "decision": { "enum": ["BLOCK", "APPROVAL"] } },
-        "required": ["decision"]
+        "required": ["decision"],
+        "not": { "properties": { "decisionStage": { "const": "RESPONSE" } }, "required": ["decisionStage"] }
       },
       "then": {
         "properties": {
@@ -227,7 +353,7 @@
       "if": {
         "allOf": [
           {
-            "properties": { "decision": { "const": "ALLOW" } },
+            "properties": { "decision": { "enum": ["ALLOW", "MASK"] } },
             "required": ["decision"]
           },
           {
@@ -247,6 +373,32 @@
     }
   ],
   "$defs": {
+    "responseScan": {
+      "$comment": "Response-stage evidence (stage 5): category counts and the detector and response-policy versions only. Never the text, the matched values or their positions. The version patterns keep free text out of the audit record.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detectorVersion", "policyVersion", "counts"],
+      "properties": {
+        "detectorVersion": { "type": "string", "pattern": "^response-scan-[0-9]{1,4}$" },
+        "policyVersion": { "type": "string", "pattern": "^response-policy-[0-9]{1,4}$" },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["RRN", "ACCOUNT_NUMBER", "PHONE_NUMBER", "OTHER_CUSTOMER"],
+          "properties": {
+            "RRN": { "$ref": "#/$defs/findingCount" },
+            "ACCOUNT_NUMBER": { "$ref": "#/$defs/findingCount" },
+            "PHONE_NUMBER": { "$ref": "#/$defs/findingCount" },
+            "OTHER_CUSTOMER": { "$ref": "#/$defs/findingCount" }
+          }
+        }
+      }
+    },
+    "findingCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 256
+    },
     "nonEmptyIdentifier": {
       "type": "string",
       "minLength": 1,
@@ -262,11 +414,11 @@
     },
     "tool": {
       "type": "string",
-      "enum": ["CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ"]
+      "enum": ["CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ"]
     },
     "dataType": {
       "type": "string",
-      "enum": ["CREDIT_SCORE", "INCOME", "DEBT"]
+      "enum": ["CREDIT_SCORE", "INCOME", "DEBT", "LOAN_APPLICATION"]
     },
     "riskScore": {
       "type": "number",

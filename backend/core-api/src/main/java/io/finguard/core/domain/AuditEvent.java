@@ -172,6 +172,29 @@ public class AuditEvent {
     @Column(name = "error_location", length = 64)
     private String errorLocation;
 
+    /** 최종 판정을 내린 단계. 응답 단계 결과에만 아래 검사 증거가 있다(V14, docs/04 §19.1). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decision_stage", nullable = false, length = 16)
+    private DecisionStage decisionStage = DecisionStage.REQUEST;
+
+    @Column(name = "response_detector_version", length = 32)
+    private String responseDetectorVersion;
+
+    @Column(name = "response_policy_version", length = 32)
+    private String responsePolicyVersion;
+
+    @Column(name = "response_rrn_count")
+    private Integer responseRrnCount;
+
+    @Column(name = "response_account_number_count")
+    private Integer responseAccountNumberCount;
+
+    @Column(name = "response_phone_number_count")
+    private Integer responsePhoneNumberCount;
+
+    @Column(name = "response_other_customer_count")
+    private Integer responseOtherCustomerCount;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
     private AuditStatus status;
@@ -442,6 +465,23 @@ public class AuditEvent {
         return errorLocation;
     }
 
+    public DecisionStage getDecisionStage() {
+        return decisionStage;
+    }
+
+    /** 응답 단계 검사 증거. 검사가 끝난 응답 단계 결과에만 있다. */
+    public ResponseScan getResponseScan() {
+        return responseDetectorVersion == null
+                ? null
+                : new ResponseScan(
+                        responseDetectorVersion,
+                        responsePolicyVersion,
+                        responseRrnCount,
+                        responseAccountNumberCount,
+                        responsePhoneNumberCount,
+                        responseOtherCustomerCount);
+    }
+
     public Instant getCompletedAt() {
         return completedAt;
     }
@@ -513,6 +553,8 @@ public class AuditEvent {
                 && Objects.equals(completion.recordsRead(), recordsRead)
                 && Objects.equals(completion.latencyMs(), latencyMs)
                 && Objects.equals(completion.errorLocation(), errorLocation)
+                && completion.decisionStage() == decisionStage
+                && Objects.equals(completion.responseScan(), getResponseScan())
                 && sameRisk(completion.behaviorRisk(), behaviorRisk)
                 && samePolicyInput(completion.policyInput())
                 && completion.severity() == severity
@@ -534,6 +576,14 @@ public class AuditEvent {
         this.recordsRead = completion.recordsRead();
         this.latencyMs = completion.latencyMs();
         this.errorLocation = completion.errorLocation();
+        this.decisionStage = completion.decisionStage();
+        ResponseScan scan = completion.responseScan();
+        this.responseDetectorVersion = scan == null ? null : scan.detectorVersion();
+        this.responsePolicyVersion = scan == null ? null : scan.policyVersion();
+        this.responseRrnCount = scan == null ? null : scan.rrn();
+        this.responseAccountNumberCount = scan == null ? null : scan.accountNumber();
+        this.responsePhoneNumberCount = scan == null ? null : scan.phoneNumber();
+        this.responseOtherCustomerCount = scan == null ? null : scan.otherCustomer();
         this.behaviorRisk = completion.behaviorRisk();
         PolicyInput policyInput = completion.policyInput();
         // 판정이 승인을 썼다는 주장은 Core가 resolve 때 승인을 이 행에 적은 사실과 같아야 한다. 다르면 정책이 본 입력과
