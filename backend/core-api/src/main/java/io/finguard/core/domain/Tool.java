@@ -10,7 +10,9 @@ package io.finguard.core.domain;
 public enum Tool {
     CREDIT_SCORE_READ(DataType.CREDIT_SCORE),
     INCOME_READ(DataType.INCOME),
-    DEBT_READ(DataType.DEBT);
+    DEBT_READ(DataType.DEBT),
+    /** 대출 신청서(자유 텍스트). Gateway가 응답을 검사한 뒤 내보낸다 — docs/04 §19. */
+    LOAN_APPLICATION_READ(DataType.LOAN_APPLICATION);
 
     private final DataType requiredData;
 

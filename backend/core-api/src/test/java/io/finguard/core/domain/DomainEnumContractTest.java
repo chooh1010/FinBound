@@ -18,7 +18,7 @@ class DomainEnumContractTest {
         // docs/06 §16
         assertThat(Tool.values())
                 .extracting(Enum::name)
-                .containsExactly("CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ");
+                .containsExactly("CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ");
     }
 
     @Test
@@ -26,7 +26,7 @@ class DomainEnumContractTest {
         // docs/06 §17
         assertThat(DataType.values())
                 .extracting(Enum::name)
-                .containsExactly("CREDIT_SCORE", "INCOME", "DEBT");
+                .containsExactly("CREDIT_SCORE", "INCOME", "DEBT", "LOAN_APPLICATION");
     }
 
     @Test
@@ -107,6 +107,9 @@ class DomainEnumContractTest {
                         "CASE_SCOPE_ATTACK",
                         "TOOL_SCOPE_ATTACK",
                         "DATA_SCOPE_ATTACK",
-                        "MANDATE_SCOPE_ATTACK");
+                        "MANDATE_SCOPE_ATTACK",
+                        "DOCUMENT_WITH_PII",
+                        "DOCUMENT_CLEAN",
+                        "DOCUMENT_OTHER_CUSTOMER");
     }
 }

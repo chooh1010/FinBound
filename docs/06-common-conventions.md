@@ -300,6 +300,7 @@ CRITICAL
 CREDIT_SCORE_READ
 INCOME_READ
 DEBT_READ
+LOAN_APPLICATION_READ   (자유 텍스트 — 응답을 검사한 뒤 내보낸다, docs/04 §19)
 ```
 
 P0에서 문자열 자유입력을 허용하지 않는다.
@@ -312,6 +313,7 @@ P0에서 문자열 자유입력을 허용하지 않는다.
 CREDIT_SCORE
 INCOME
 DEBT
+LOAN_APPLICATION
 ```
 
 P1 확장 예:

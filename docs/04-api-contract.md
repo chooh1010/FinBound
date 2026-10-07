@@ -282,6 +282,13 @@ Gateway Body에는 Scenario나 권한 근거를 추가하지 않는다. Tool/Dat
 | `TOOL_SCOPE_ATTACK` | `CUST-1002` | `INCOME_READ` | `[INCOME]` | BLOCK / `TOOL_SCOPE_VIOLATION` 포함 |
 | `DATA_SCOPE_ATTACK` | `CUST-1002` | `CREDIT_SCORE_READ` | `[CREDIT_SCORE, INCOME]` | BLOCK / `DATA_SCOPE_VIOLATION` 포함 |
 | `MANDATE_SCOPE_ATTACK` | `CUST-1003` | `DEBT_READ` | `[DEBT]` | BLOCK / `MANDATE_SCOPE_VIOLATION` 포함 |
+| `DOCUMENT_WITH_PII` | `CUST-1001` | `LOAN_APPLICATION_READ` | `[LOAN_APPLICATION]` | MASK(응답 단계, §19) |
+| `DOCUMENT_CLEAN` | `CUST-1002` | `LOAN_APPLICATION_READ` | `[LOAN_APPLICATION]` | ALLOW(응답 단계) |
+| `DOCUMENT_OTHER_CUSTOMER` | `CUST-1003` | `LOAN_APPLICATION_READ` | `[LOAN_APPLICATION]` | BLOCK / `OTHER_CUSTOMER_DATA_IN_RESPONSE`(응답 단계) |
+
+문서 시나리오 셋(5단계)은 같은 Tool로 고객마다 다른 고정 문서를 읽는다. 세 고객의 Mandate와 대출 심사 Template·EMP-101
+권한에 `LOAN_APPLICATION`이 있어 호출 전 판정은 ALLOW이고, 결과는 응답 검사가 정한다. 공격 셋의 기대 사유는
+`INCOME`·`DEBT`에만 걸려 이 추가의 영향을 받지 않는다.
 
 공격 셋의 `targetConsumerId`가 `CUST-1001`이 아닌 이유는 아래 Fixture 조건에 있다. `CUST-1001`은
 정상 경로용이라 Tool·Data를 모두 허용하므로, 같은 고객을 노리면 `TOOL_SCOPE_ATTACK`이
@@ -337,7 +344,7 @@ Core의 7개 Scenario 지원과 실제 Core Resolver 연결을 확인한 뒤 확
 Simulator는 Scenario를 §5의 Gateway Tool Call로 변환한다. Gateway 응답의 `ALLOW/BLOCK`은
 정책 결과로 그대로 반환하며, Timeout·5xx·본문 누락은 성공이나 `ALLOW`로 바꾸지 않는다.
 Agent는 `requestId`와 `decision`, ALLOW의 `result.tool`·`result.consumerId`가 요청과
-일치하는지와 Tool별 숫자 결과(`creditScore`, `annualIncome`, `totalDebt`)를 검증한다.
+일치하는지와 Tool별 결과(숫자 `creditScore`, `annualIncome`, `totalDebt`, 문서 Tool은 문자열 `documentText`)를 검증한다.
 이는 응답 계약 검사이며 Scope 비교나 발급 여부 증명이 아니다. BLOCK은 비어 있지 않은
 `reasonCodes`를 요구한다. `403 + ALLOW` 또는 금융 결과가 포함된 BLOCK처럼 서로
 모순되는 응답과 잘못된 JSON은 `GATEWAY_RESPONSE_INVALID`로 처리한다.
@@ -1158,6 +1165,7 @@ Tool별 `result` Field:
 CREDIT_SCORE_READ → creditScore
 INCOME_READ       → annualIncome
 DEBT_READ         → totalDebt
+LOAN_APPLICATION_READ → documentText (문자열, 고객별 합성 고정 문서. CUST-1001·1002·1003만 있다)
 ```
 
 ### 오류 응답

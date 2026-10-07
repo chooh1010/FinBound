@@ -414,11 +414,11 @@
     },
     "tool": {
       "type": "string",
-      "enum": ["CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ"]
+      "enum": ["CREDIT_SCORE_READ", "INCOME_READ", "DEBT_READ", "LOAN_APPLICATION_READ"]
     },
     "dataType": {
       "type": "string",
-      "enum": ["CREDIT_SCORE", "INCOME", "DEBT"]
+      "enum": ["CREDIT_SCORE", "INCOME", "DEBT", "LOAN_APPLICATION"]
     },
     "riskScore": {
       "type": "number",

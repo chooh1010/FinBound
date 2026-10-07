@@ -42,4 +42,10 @@ public enum AgentSimulationScenario {
 
     /** 고객 위임 범위 밖의 자료를 조회하려 한다. 요청 자체는 {@code NORMAL_DEBT}와 같다. */
     MANDATE_SCOPE_ATTACK,
+    /** 개인정보가 든 대출 신청서를 읽는다. 응답 단계에서 MASK된다(docs/04 §19). */
+    DOCUMENT_WITH_PII,
+    /** 민감정보가 없는 대출 신청서를 읽는다. 그대로 나간다. */
+    DOCUMENT_CLEAN,
+    /** 다른 고객의 식별자가 든 대출 신청서를 읽는다. 호출 후 BLOCK된다. */
+    DOCUMENT_OTHER_CUSTOMER,
 }

@@ -48,7 +48,8 @@ where template_id = 'LOAN_REVIEW_STANDARD';
 insert into permission_template_allowed_tools (template_id, tool)
 values ('LOAN_REVIEW_STANDARD', 'CREDIT_SCORE_READ'),
        ('LOAN_REVIEW_STANDARD', 'INCOME_READ'),
-       ('LOAN_REVIEW_STANDARD', 'DEBT_READ')
+       ('LOAN_REVIEW_STANDARD', 'DEBT_READ'),
+       ('LOAN_REVIEW_STANDARD', 'LOAN_APPLICATION_READ')
 on conflict (template_id, tool) do nothing;
 
 delete
@@ -58,7 +59,8 @@ where template_id = 'LOAN_REVIEW_STANDARD';
 insert into permission_template_allowed_data (template_id, data_type)
 values ('LOAN_REVIEW_STANDARD', 'CREDIT_SCORE'),
        ('LOAN_REVIEW_STANDARD', 'INCOME'),
-       ('LOAN_REVIEW_STANDARD', 'DEBT')
+       ('LOAN_REVIEW_STANDARD', 'DEBT'),
+       ('LOAN_REVIEW_STANDARD', 'LOAN_APPLICATION')
 on conflict (template_id, data_type) do nothing;
 
 -- ---------------------------------------------------------------- 직원 권한 (넓다)
@@ -78,7 +80,8 @@ where employee_id = 'EMP-101';
 insert into employee_authority_allowed_tools (employee_id, tool)
 values ('EMP-101', 'CREDIT_SCORE_READ'),
        ('EMP-101', 'INCOME_READ'),
-       ('EMP-101', 'DEBT_READ')
+       ('EMP-101', 'DEBT_READ'),
+       ('EMP-101', 'LOAN_APPLICATION_READ')
 on conflict (employee_id, tool) do nothing;
 
 delete
@@ -88,7 +91,8 @@ where employee_id = 'EMP-101';
 insert into employee_authority_allowed_data (employee_id, data_type)
 values ('EMP-101', 'CREDIT_SCORE'),
        ('EMP-101', 'INCOME'),
-       ('EMP-101', 'DEBT')
+       ('EMP-101', 'DEBT'),
+       ('EMP-101', 'LOAN_APPLICATION')
 on conflict (employee_id, data_type) do nothing;
 
 -- ---------------------------------------------------------------- 소비자 동의
@@ -112,7 +116,7 @@ where mandate_id in (
 insert into consumer_mandate_allowed_data (mandate_id, data_type)
 select m.mandate_id, d.data_type
 from consumer_mandates m
-         cross join (values ('CREDIT_SCORE'), ('INCOME'), ('DEBT')) as d(data_type)
+         cross join (values ('CREDIT_SCORE'), ('INCOME'), ('DEBT'), ('LOAN_APPLICATION')) as d(data_type)
 where m.consumer_id = 'CUST-1001'
   and m.purpose = 'LOAN_REVIEW'
 on conflict (mandate_id, data_type) do nothing;
@@ -145,20 +149,21 @@ where mandate_id in (
       and purpose = 'LOAN_REVIEW'
 );
 
--- CUST-1002: INCOME 없음 → Passport tools {CREDIT_SCORE_READ, DEBT_READ}
+-- CUST-1002: INCOME 없음 → Passport tools {CREDIT_SCORE_READ, DEBT_READ, LOAN_APPLICATION_READ}
+-- LOAN_APPLICATION은 응답 검사 시나리오(DOCUMENT_*)용이다. 공격 시나리오의 기대 사유는 INCOME·DEBT에만 걸려 영향이 없다.
 insert into consumer_mandate_allowed_data (mandate_id, data_type)
 select m.mandate_id, d.data_type
 from consumer_mandates m
-         cross join (values ('CREDIT_SCORE'), ('DEBT')) as d(data_type)
+         cross join (values ('CREDIT_SCORE'), ('DEBT'), ('LOAN_APPLICATION')) as d(data_type)
 where m.consumer_id = 'CUST-1002'
   and m.purpose = 'LOAN_REVIEW'
 on conflict (mandate_id, data_type) do nothing;
 
--- CUST-1003: DEBT 없음 → Passport tools {CREDIT_SCORE_READ, INCOME_READ}
+-- CUST-1003: DEBT 없음 → Passport tools {CREDIT_SCORE_READ, INCOME_READ, LOAN_APPLICATION_READ}
 insert into consumer_mandate_allowed_data (mandate_id, data_type)
 select m.mandate_id, d.data_type
 from consumer_mandates m
-         cross join (values ('CREDIT_SCORE'), ('INCOME')) as d(data_type)
+         cross join (values ('CREDIT_SCORE'), ('INCOME'), ('LOAN_APPLICATION')) as d(data_type)
 where m.consumer_id = 'CUST-1003'
   and m.purpose = 'LOAN_REVIEW'
 on conflict (mandate_id, data_type) do nothing;
