@@ -4,4 +4,5 @@ public enum FinancialDataType {
     CREDIT_SCORE,
     INCOME,
     DEBT,
+    LOAN_APPLICATION,
 }

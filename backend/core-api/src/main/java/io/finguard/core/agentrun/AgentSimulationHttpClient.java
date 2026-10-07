@@ -52,8 +52,29 @@ public class AgentSimulationHttpClient implements AgentSimulationClient {
                     .retrieve()
                     .toBodilessEntity();
         } catch (RuntimeException failure) {
-            // 응답 본문을 예외 메시지에 담지 않는다 — docs/06 §26.
-            throw new AgentSimulationFailedException(agentRunId, failure);
+            // 응답 본문을 예외 메시지에 담지 않는다 — docs/06 §26. Spring의 HTTP 오류 예외는 메시지에 본문을 싣고, 원인으로
+            // 달아 두면 로그가 원인 체인째 찍는다. 종류와 상태 코드만 남긴 원인으로 바꾼다.
+            throw new AgentSimulationFailedException(agentRunId, sanitized(failure));
+        }
+    }
+
+    private static RuntimeException sanitized(RuntimeException failure) {
+        String description = failure.getClass().getSimpleName();
+        if (failure instanceof org.springframework.web.client.RestClientResponseException response) {
+            description += " status=" + response.getStatusCode().value();
+        }
+        SanitizedFailure sanitized = new SanitizedFailure(description);
+        sanitized.setStackTrace(failure.getStackTrace());
+        return sanitized;
+    }
+
+    /** 종류·상태 코드만 담는다. 원인을 갖지 않는다. */
+    static final class SanitizedFailure extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        SanitizedFailure(String description) {
+            super(description, null, false, true);
         }
     }
 
